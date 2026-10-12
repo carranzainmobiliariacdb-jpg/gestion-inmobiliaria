@@ -209,3 +209,5 @@ consultar; si no hay conexión o el BCRA no responde, se muestra un aviso y
 un botón para reintentar. El id de la variable ICL se busca por nombre en el
 catálogo del BCRA en cada consulta (por si cambiara con el tiempo); si esa
 búsqueda falla, se usa como respaldo el id conocido actualmente (40).
+
+<!-- build 2026-10-12T19:13:46Z -->
