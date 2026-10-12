@@ -1788,7 +1788,28 @@ $("tbl-pagos").addEventListener("click", async (e) => {
   await loadAll();
 });
 
-const METODOS_PAGO = ["Efectivo", "Transferencia", "Depósito bancario", "Mercado Pago", "Cheque", "Débito / Crédito", "Otro"];
+/** Campos extra según la forma de pago. */
+const DETALLE_PAGO = {
+  Efectivo: [],
+  Transferencia: [
+    ["banco", "Banco / billetera de origen", "text", "Ej: Banco Nación, Mercado Pago"],
+    ["operacion", "N° de operación / comprobante", "text", ""],
+  ],
+  Cheque: [
+    ["banco", "Banco del cheque", "text", "Ej: Banco de Córdoba"],
+    ["numero", "N° de cheque", "text", ""],
+    ["fecha", "Fecha de cobro", "date", ""],
+  ],
+  Otro: [["detalle", "Detalle", "text", "Ej: depósito, Mercado Pago, tarjeta"]],
+};
+
+/** Texto de la forma de pago que se guarda y sale impreso en el recibo. */
+function textoFormaPago(metodo, d) {
+  if (metodo === "Transferencia") return ["Transferencia", d.banco && `— ${d.banco}`, d.operacion && `· Op. N° ${d.operacion}`].filter(Boolean).join(" ");
+  if (metodo === "Cheque") return ["Cheque", d.banco && `${d.banco}`, d.numero && `N° ${d.numero}`, d.fecha && `· cobro ${fmtDate(d.fecha)}`].filter(Boolean).join(" ");
+  if (metodo === "Otro") return d.detalle || "Otro";
+  return "Efectivo";
+}
 
 /** Abre el formulario de cobro. contratoId/periodo opcionales (desde el tablero). */
 async function abrirCobro(contratoId = null, periodo = null) {
@@ -1805,7 +1826,14 @@ async function abrirCobro(contratoId = null, periodo = null) {
             <select id="cb-contrato" size="1">${opciones}</select></div>
           <div class="form-field"><label>Período que paga</label><input type="month" id="cb-periodo" /></div>
           <div class="form-field"><label>Fecha de pago</label><input type="date" id="cb-fecha" value="${hoy}" /></div>
-          <div class="form-field"><label>Forma de pago</label><select id="cb-metodo">${METODOS_PAGO.map((m) => `<option>${m}</option>`).join("")}</select></div>
+          <div class="form-field full"><label>Forma de pago</label>
+            <div class="pago-opciones" id="cb-metodo-opc">
+              <button type="button" class="pago-op activo" data-metodo="Efectivo">💵 Efectivo</button>
+              <button type="button" class="pago-op" data-metodo="Transferencia">🏦 Transferencia</button>
+              <button type="button" class="pago-op" data-metodo="Cheque">🧾 Cheque</button>
+              <button type="button" class="pago-op" data-metodo="Otro">··· Otro</button>
+            </div>
+            <div class="form-grid tres pago-detalle" id="cb-metodo-detalle"></div></div>
           <div class="form-field"><label>Alquiler ($)</label><input type="number" step="any" id="cb-alquiler" /></div>
           <div class="form-field"><label>Intereses por atraso ($)</label><input type="number" step="any" id="cb-interes" /><small class="field-hint" id="cb-interes-hint"></small></div>
           <div class="form-field"><label>Multa ($)</label><input type="number" step="any" id="cb-multa" /></div>
@@ -1903,6 +1931,19 @@ async function abrirCobro(contratoId = null, periodo = null) {
         });
         if (primero && sel.selectedOptions[0]?.hidden) elegirContrato(primero.value);
       });
+      const pintarDetallePago = (metodo) => {
+        $("cb-metodo-detalle").innerHTML = DETALLE_PAGO[metodo]
+          .map(([k, label, tipo, ph]) => `<div class="form-field"><label>${label}</label><input type="${tipo}" data-pago="${k}" placeholder="${esc(ph)}" /></div>`)
+          .join("");
+      };
+      $("cb-metodo-opc").addEventListener("click", (e) => {
+        const b = e.target.closest("[data-metodo]");
+        if (!b) return;
+        document.querySelectorAll("#cb-metodo-opc .pago-op").forEach((x) => x.classList.toggle("activo", x === b));
+        pintarDetallePago(b.dataset.metodo);
+        $("cb-metodo-detalle").querySelector("input")?.focus();
+      });
+      pintarDetallePago("Efectivo");
       $("cb-periodo").addEventListener("change", () => recalcular(true));
       $("cb-fecha").addEventListener("change", () => recalcular(true));
       $("cb-layout").addEventListener("input", (e) => {
@@ -1921,7 +1962,7 @@ async function abrirCobro(contratoId = null, periodo = null) {
         contrato_id: c.id,
         periodo: per,
         fecha_pago: $("cb-fecha").value || hoy,
-        metodo_pago: $("cb-metodo").value,
+        metodo_pago: leerFormaPago(),
         notas: $("cb-notas").value.trim() || null,
         monto_alquiler: Number($("cb-alquiler").value || 0),
         monto_mora: Number($("cb-interes").value || 0),
@@ -1938,6 +1979,13 @@ async function abrirCobro(contratoId = null, periodo = null) {
       setTimeout(() => verRecibo(id), 0);
     },
   });
+}
+
+function leerFormaPago() {
+  const metodo = document.querySelector("#cb-metodo-opc .pago-op.activo")?.dataset.metodo || "Efectivo";
+  const d = {};
+  document.querySelectorAll("#cb-metodo-detalle [data-pago]").forEach((i) => (d[i.dataset.pago] = i.value.trim()));
+  return textoFormaPago(metodo, d);
 }
 
 async function verRecibo(pagoId) {
@@ -2435,7 +2483,7 @@ async function renderConfig() {
         ${campoCfg("recibo_leyenda", "Leyenda al pie del recibo (opcional)", { full: true, placeholder: "Ej: El pago fuera de término devenga intereses según contrato." })}
         ${campoCfg("contrato_jurisdiccion", "Jurisdicción para los contratos", { full: true, hint: "Se usa en {{inmobiliaria.jurisdiccion}} de los modelos" })}
         <div class="form-field full"><label>Logo del recibo</label>
-          <div style="display:flex;gap:10px;align-items:center"><img class="logo-preview" id="cfg-logo-prev" src="${esc(logo || "logo-recibo.jpg")}" />
+          <div style="display:flex;gap:10px;align-items:center"><img class="logo-preview" id="cfg-logo-prev" src="${esc(logo || "logo-carranza.png")}" />
           <button type="button" class="btn-secondary btn-sm" id="cfg-logo-cambiar">Cambiar…</button>
           <button type="button" class="btn-link" id="cfg-logo-reset">Usar el de siempre</button>
           <input type="file" id="cfg-logo-file" accept="image/*" class="hidden" /></div></div>
@@ -2450,7 +2498,7 @@ async function renderConfig() {
     });
     $("cfg-logo-reset").addEventListener("click", () => {
       cfgBorrador.recibo_logo = "";
-      $("cfg-logo-prev").src = "logo-recibo.jpg";
+      $("cfg-logo-prev").src = "logo-carranza.png";
     });
     $("cfg-recibo-prueba").addEventListener("click", () => {
       guardarBorradorConfig();

@@ -6,22 +6,18 @@ import { esc, money, numero, fmtDate, hoyIso, periodoTexto, mesDeContrato, monto
 
 const n0 = (v) => numero(v, 2);
 
-function encabezado(cfg) {
-  const logo = cfg.recibo_logo || "logo-recibo.jpg";
+/** Banda negra con el logo y los datos de la inmobiliaria (liquidación, acta). */
+function encabezado(cfg, titulo = "", numero = "") {
+  const logo = cfg.recibo_logo || "logo-carranza.png";
   return `
-    <div class="doc-cab">
-      <div class="doc-cab-logo"><img src="${esc(logo)}" alt="" /></div>
-      <div class="doc-cab-x">
-        <div class="doc-x">X</div>
-        <div class="doc-novalido">Comprobante No válido como Factura</div>
+    <div class="dm-cab">
+      <img class="dm-logo" src="${esc(logo)}" alt="" />
+      <div class="dm-marca">
+        <span class="dm-nombre">${esc((cfg.inmobiliaria_nombre || "CARRANZA Inmobiliaria").replace(/\s*inmobiliaria\s*/i, ""))}</span>
+        <span class="dm-sub">INMOBILIARIA${cfg.inmobiliaria_matricula ? ` · ${esc(cfg.inmobiliaria_matricula)}` : ""}</span>
+        <span class="dm-contacto">${[cfg.inmobiliaria_direccion && `${esc(cfg.inmobiliaria_direccion)}${cfg.inmobiliaria_localidad ? `, ${esc(cfg.inmobiliaria_localidad)}` : ""}`, cfg.inmobiliaria_telefono && `Tel. ${esc(cfg.inmobiliaria_telefono)}`, esc(cfg.inmobiliaria_email || "")].filter(Boolean).join(" · ")}</span>
       </div>
-      <div class="doc-cab-datos">
-        <strong>${esc(cfg.inmobiliaria_nombre || "CARRANZA Inmobiliaria")}</strong>
-        ${cfg.inmobiliaria_matricula ? `<span>${esc(cfg.inmobiliaria_matricula)}</span>` : ""}
-        <span>${esc(cfg.inmobiliaria_direccion || "")}${cfg.inmobiliaria_localidad ? ` - ${esc(cfg.inmobiliaria_localidad)}` : ""}</span>
-        <span>${esc(cfg.inmobiliaria_telefono || "")}</span>
-        <span>${esc(cfg.inmobiliaria_email || "")}</span>
-      </div>
+      ${titulo ? `<div class="dm-titulo"><span>${esc(titulo)}</span>${numero !== "" ? `<b>N° ${esc(numero)}</b>` : ""}</div>` : ""}
     </div>`;
 }
 
@@ -47,66 +43,77 @@ function mitadRecibo(r, cfg, copia) {
   const prop = inm.propietarios || {};
   const t = totalesRecibo(r);
   const mes = c.fecha_inicio && c.fecha_fin ? mesDeContrato(c.fecha_inicio, c.fecha_fin, r.periodo) : null;
-  const periodo = `${periodoTexto(r.periodo)}${mes ? ` - Mes ${mes.mes}/${mes.total}` : ""}`;
+  const periodo = periodoTexto(r.periodo);
   const direccion = [inm.direccion, inm.piso_depto].filter(Boolean).join(" ");
-  const filasExtra = t.conceptos
-    .map(
-      (x) => `<tr><td>${esc((x.concepto || "").toUpperCase())}</td><td>${esc(periodoTexto(r.periodo))}</td>
-        <td class="num">${n0(x.monto)}</td><td class="num">0,00</td><td class="num">0,00</td><td class="num">${n0(x.monto)}</td></tr>`
-    )
-    .join("");
+  const logo = cfg.recibo_logo || "logo-carranza.png";
+  const filas = [
+    `<tr><td><b>Alquiler</b></td><td>${esc(periodo)}${mes ? ` <span class="rm-mes">mes ${mes.mes}/${mes.total}</span>` : ""}</td>
+      <td class="num">${n0(t.alquiler)}</td><td class="num">${n0(t.interes)}</td><td class="num">${n0(t.multa)}</td><td class="num"><b>${n0(t.alquiler + t.interes + t.multa)}</b></td></tr>`,
+    ...t.conceptos.map(
+      (x) => `<tr><td>${esc(x.concepto || "")}</td><td>${esc(periodo)}</td><td class="num">${n0(x.monto)}</td><td class="num">—</td><td class="num">—</td><td class="num"><b>${n0(x.monto)}</b></td></tr>`
+    ),
+  ].join("");
+  const ajustes = [
+    t.bonificacion ? `<div><span>Bonificación</span><span>- ${n0(t.bonificacion)}</span></div>` : "",
+    t.recargo ? `<div><span>Recargo</span><span>${n0(t.recargo)}</span></div>` : "",
+    t.aFavor ? `<div><span>Saldo a favor aplicado</span><span>- ${n0(t.aFavor)}</span></div>` : "",
+  ].join("");
   const esOriginal = copia === "ORIGINAL";
   return `
-  <div class="recibo-mitad">
-    ${encabezado(cfg)}
-    <div class="rec-datos">
-      <div class="rec-fila rec-fila-top">
-        <span><label>Fecha</label> <b>${fmtDate(r.fecha_pago)}</b></span>
-        <span class="rec-num">Recibo de Alquiler N°: ${esc(r.numero_recibo)}</span>
+  <div class="rm-mitad">
+    <div class="rm-cab">
+      <img class="rm-logo" src="${esc(logo)}" alt="" />
+      <div class="rm-marca">
+        <span class="rm-nombre">${esc((cfg.inmobiliaria_nombre || "CARRANZA").replace(/\s*inmobiliaria\s*/i, ""))}</span>
+        <span class="rm-sub">INMOBILIARIA</span>
+        <span class="rm-contacto">${esc(cfg.inmobiliaria_matricula || "")}</span>
       </div>
-      <div class="rec-fila"><label>Recibí de</label> <b>${esc(inq.nombre || "")}</b>${inq.dni_cuit ? ` <small>DNI ${esc(inq.dni_cuit)}</small>` : ""}</div>
-      <div class="rec-fila"><label>Según Contrato N°</label> <b>${esc(c.numero ?? c.id ?? "")}</b>
-        <span class="rec-sep">Venc.: ${fmtDate(c.fecha_fin)}</span><span class="rec-sep">TE: ${esc(inq.telefono || "")}</span></div>
-      <div class="rec-fila"><label>Por orden y cuenta de</label> <b>${esc(prop.nombre || "")}</b></div>
-      <div class="rec-fila"><label>${inm.codigo != null ? `<b>${esc(inm.codigo)}</b> ` : ""}Propiedad</label> <b>${esc(direccion.toUpperCase())}</b>${
-        inm.localidad ? ` <small>${esc(inm.localidad)}</small>` : ""
-      }</div>
+      <div class="rm-num">
+        <span class="rm-tipo">Recibo de alquiler</span>
+        <span class="rm-numero">N° ${esc(String(r.numero_recibo).padStart(6, "0"))}</span>
+        <span class="rm-x"><b>X</b> Documento no válido como factura</span>
+      </div>
     </div>
-    <table class="rec-tabla">
-      <thead><tr><th>Conceptos</th><th>Período</th><th class="num">Importe</th><th class="num">Intereses</th><th class="num">Multa</th><th class="num">Total</th></tr></thead>
-      <tbody>
-        <tr><td>ALQUILER</td><td>${esc(periodo)}</td><td class="num">${n0(t.alquiler)}</td><td class="num">${n0(t.interes)}</td><td class="num">${n0(t.multa)}</td>
-          <td class="num">${n0(t.alquiler + t.interes + t.multa)}</td></tr>
-        ${filasExtra}
-      </tbody>
+    <div class="rm-franja">
+      <div><label>Fecha</label><b>${fmtDate(r.fecha_pago)}</b></div>
+      <div><label>Período</label><b>${esc(periodo)}</b></div>
+      <div><label>Contrato N°</label><b>${esc(c.numero ?? c.id ?? "")}</b></div>
+      <div><label>Vence</label><b>${fmtDate(c.fecha_fin)}</b></div>
+    </div>
+    <div class="rm-datos">
+      <div class="rm-dato rm-full"><label>Recibí de</label><b>${esc(inq.nombre || "")}</b>${[inq.dni_cuit && `DNI ${esc(inq.dni_cuit)}`, inq.telefono && `Tel. ${esc(inq.telefono)}`].filter(Boolean).map((x) => `<small>${x}</small>`).join("")}</div>
+      <div class="rm-dato rm-full"><label>Propiedad</label><b>${inm.codigo != null ? `<span class="rm-cod">${esc(inm.codigo)}</span> ` : ""}${esc(direccion)}</b>${inm.localidad ? `<small>${esc(inm.localidad)}</small>` : ""}</div>
+      <div class="rm-dato rm-full"><label>Por cuenta y orden de</label><b>${esc(prop.nombre || "")}</b></div>
+    </div>
+    <table class="rm-tabla">
+      <thead><tr><th>Concepto</th><th>Período</th><th class="num">Importe</th><th class="num">Interés</th><th class="num">Multa</th><th class="num">Total</th></tr></thead>
+      <tbody>${filas}</tbody>
     </table>
-    <div class="rec-resumen">
-      <div><span>Alquiler: ${n0(t.alquiler)}</span><span>Interés: ${n0(t.interes)}</span><span>Multa: ${n0(t.multa)}</span></div>
-      <div><span>Servicios: ${n0(t.servicios)}</span><span>Otros: ${n0(t.otros)}</span><span>A favor: ${n0(t.aFavor)}</span></div>
-      <div class="rec-resumen-der"><span>Subtotal: ${n0(t.subtotal)}</span><span>Bonificación: ${n0(t.bonificacion)}</span><span>Recargo: ${n0(t.recargo)}</span>
-        <strong>Total: ${money(t.total)}</strong></div>
-    </div>
-    <div class="rec-letras">Son Pesos: ${montoEnLetras(t.total)}</div>
-    <div class="rec-extra">
-      ${r.metodo_pago ? `<div><label>Forma de pago:</label> ${esc(r.metodo_pago)}</div>` : ""}
-      ${r.dias_mora > 0 ? `<div><label>Pagado con</label> ${esc(r.dias_mora)} días de atraso</div>` : ""}
-      ${r.notas ? `<div><label>Observaciones:</label> ${esc(r.notas)}</div>` : ""}
-      ${cfg.recibo_leyenda ? `<div class="rec-leyenda">${esc(cfg.recibo_leyenda)}</div>` : ""}
-    </div>
-    <div class="rec-pie">
-      <div class="rec-pie-fila">
-        <span>${copia}</span>
-        <span class="rec-firma">${esOriginal ? "Recibí conforme" : "Recibí copia"}</span>
+    <div class="rm-totales">
+      <div class="rm-ajustes">
+        <div><span>Subtotal</span><span>${n0(t.subtotal)}</span></div>
+        ${ajustes}
+        ${r.metodo_pago ? `<div class="rm-pago"><span>Forma de pago</span><span>${esc(r.metodo_pago)}</span></div>` : ""}
       </div>
-      <div class="rec-pie-fila rec-pie-chico">
-        <span>Impreso: ${fmtDate(hoyIso())}</span><span>Recibo N° ${esc(r.numero_recibo)}</span><span>Usuario: ${esc((r.usuario || "").toUpperCase())}</span>
-      </div>
+      <div class="rm-total"><span>TOTAL</span><b>${money(t.total)}</b></div>
     </div>
+    <div class="rm-letras">Son pesos ${montoEnLetras(t.total).toLowerCase().replace(" cts.", "")}</div>
+    <div class="rm-extra">
+      ${r.dias_mora > 0 ? `<div>Pagado con ${esc(r.dias_mora)} días de atraso.</div>` : ""}
+      ${r.notas ? `<div><b>Observaciones:</b> ${esc(r.notas)}</div>` : ""}
+      ${cfg.recibo_leyenda ? `<div class="rm-leyenda">${esc(cfg.recibo_leyenda)}</div>` : ""}
+    </div>
+    <div class="rm-pie">
+      <span class="rm-copia ${esOriginal ? "rm-original" : ""}">${copia}</span>
+      <div class="rm-firma">${esOriginal ? "Firma y sello" : "Recibí copia — firma del inquilino"}</div>
+    </div>
+    <div class="rm-legal">${[cfg.inmobiliaria_direccion && `${esc(cfg.inmobiliaria_direccion)}${cfg.inmobiliaria_localidad ? `, ${esc(cfg.inmobiliaria_localidad)}` : ""}`, cfg.inmobiliaria_telefono && `Tel. ${esc(cfg.inmobiliaria_telefono)}`, esc(cfg.inmobiliaria_email || "")].filter(Boolean).join(" · ")}
+      <span>Impreso ${fmtDate(hoyIso())}${r.usuario ? ` · ${esc(r.usuario)}` : ""}</span></div>
   </div>`;
 }
 
 export function htmlRecibo(r, cfg) {
-  return `<div class="doc doc-recibo">${mitadRecibo(r, cfg, "DUPLICADO")}${mitadRecibo(r, cfg, "ORIGINAL")}</div>`;
+  return `<div class="doc doc-recibo-m">${mitadRecibo(r, cfg, "DUPLICADO")}<div class="rm-corte"></div>${mitadRecibo(r, cfg, "ORIGINAL")}</div>`;
 }
 
 /** filas = respuesta de get_comprobante (una fila por recibo liquidado). */
@@ -146,10 +153,10 @@ export function htmlLiquidacion(filas, cfg) {
   const notas = filas.map((f) => f.notas).filter(Boolean).join(" · ");
   return `
   <div class="doc doc-liquidacion">
-    ${encabezado(cfg)}
+    ${encabezado(cfg, "Liquidación al propietario", f0.numero_comprobante)}
     <div class="liq-titulo">
-      <h2>Liquidación al Propietario</h2>
-      <div class="liq-num">N° <b>${esc(f0.numero_comprobante)}</b><br/>Fecha: <b>${fmtDate(f0.fecha)}</b></div>
+      <h2>Liquidación de alquileres cobrados</h2>
+      <div class="liq-num">Fecha: <b>${fmtDate(f0.fecha)}</b></div>
     </div>
     <div class="liq-datos">
       <div><label>Propietario</label><b>${esc(prop.nombre || "")}</b></div>
@@ -190,7 +197,7 @@ export function htmlActaFotos({ inmueble, contrato, fotos, tipo, fecha }, cfg) {
     )
     .join("");
   return `<div class="doc doc-acta">
-    ${encabezado(cfg)}
+    ${encabezado(cfg, "Acta de estado")}
     <div class="acta-cuerpo">
       <h2>Acta de constatación del estado del inmueble${tipo ? ` — ${esc(tipo)}` : ""}</h2>
       <div class="acta-datos">
