@@ -500,3 +500,6 @@ small.muted { font-size: 12px; }
 .doc-liquidacion .liq-titulo h2 { color: #15181e; }
 .liq-tabla th { background: #f5ecd8 !important; border-bottom: 1.5px solid #c39b4a !important; color: #5c4719; }
 .liq-neto { border-top: 2px solid #c39b4a !important; }
+
+.wa-guia { margin-top: 16px; background: #eaf7ef; border: 1px solid #bfe6cd; border-radius: 10px; padding: 12px 14px; font-size: 13px; color: #1d5a37; }
+.wa-guia ol { margin: 8px 0 10px; padding-left: 20px; line-height: 1.6; }

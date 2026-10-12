@@ -44,6 +44,8 @@ const CONFIG_DEFECTO = {
   aumento_redondeo: "1",
   contrato_jurisdiccion: "los Tribunales Ordinarios de la ciudad de Corral de Bustos - Ifflinger, Provincia de Córdoba",
   wa_codigo_area: "3468",
+  wa_inmobiliaria: "3468563371",
+  wa_modo: "app",
   wa_datos_pago: "",
   aviso_dias_antes: "5",
   plantilla_recordatorio:
@@ -353,6 +355,17 @@ function datosBaseMensaje() {
   return { inmobiliaria: cfg("inmobiliaria_nombre"), datos_pago: pago ? `Datos para transferir: ${pago}` : "" };
 }
 
+/**
+ * Enlace para abrir el chat. "app" abre WhatsApp de escritorio instalado en
+ * la PC (vinculado con el número de la inmobiliaria); "web" usa WhatsApp Web.
+ */
+function urlWhatsapp(tel, mensaje = "") {
+  const texto = mensaje ? `&text=${encodeURIComponent(mensaje)}` : "";
+  if (cfg("wa_modo") === "web") return `https://web.whatsapp.com/send?phone=${tel}${texto}`;
+  if (cfg("wa_modo") === "wame") return enlaceWhatsapp(tel, mensaje);
+  return `whatsapp://send?phone=${tel}${texto}`;
+}
+
 /** Abre WhatsApp con el mensaje y lo registra. Devuelve true si se pudo abrir. */
 async function enviarWhatsapp({ telefono, mensaje, contrato_id = null, tipo, referencia = null, nombre = "" }) {
   const tel = telefonoWhatsapp(telefono, cfg("wa_codigo_area"));
@@ -361,7 +374,7 @@ async function enviarWhatsapp({ telefono, mensaje, contrato_id = null, tipo, ref
     return false;
   }
   const limpio = mensaje.replace(/\n{3,}/g, "\n\n").replace(/\n+$/, "");
-  await call("abrir_enlace", { url: enlaceWhatsapp(tel, limpio) });
+  await call("abrir_enlace", { url: urlWhatsapp(tel, limpio) });
   try {
     const reg = { contrato_id, tipo, referencia, telefono: tel, mensaje: limpio, fecha: hoyIso(), usuario: usuarioNombre() };
     await invoke("registrar_recordatorio", { recordatorio: reg });
@@ -687,14 +700,17 @@ const TABS_AVISOS = [
   ["aumento", "Aumentos"],
   ["vencimiento", "Fin de contrato"],
   ["cumple", "Cumpleaños"],
+  ["historial", "Historial de mensajes"],
 ];
 
 function renderAvisos() {
   const grupos = calcularAvisos();
   $("avisos-tabs").innerHTML = TABS_AVISOS.map(([k, label]) => {
+    if (k === "historial") return `<button class="tab ${k === avisosTab ? "active" : ""}" data-avisos-tab="${k}">🕘 ${label}</button>`;
     const pend = grupos[k].filter((a) => !a.enviado).length;
     return `<button class="tab ${k === avisosTab ? "active" : ""}" data-avisos-tab="${k}">${label} <span class="cnt">${pend}/${grupos[k].length}</span></button>`;
   }).join("");
+  if (avisosTab === "historial") return renderHistorialMensajes();
   const lista = grupos[avisosTab];
   avisosCache = lista;
   const ayuda = {
@@ -740,6 +756,120 @@ function actualizarBadges() {
   } catch (e) {
     console.error(e);
   }
+}
+
+// ---------- Mensajes libres por WhatsApp ----------
+
+const TIPO_AVISO_TXT = { recordatorio: "Recordatorio", deuda: "Atraso", aumento: "Aumento", vencimiento: "Fin de contrato", cumple: "Cumpleaños", recibo: "Recibo", liquidacion: "Liquidación", mensaje: "Mensaje" };
+
+function destinatarioDe(tabla, p) {
+  const rol = { propietarios: "Propietario", inquilinos: "Inquilino", garantes: "Garante" }[tabla];
+  const c = tabla === "inquilinos" ? state.contratos.find((x) => x.inquilino_id === p.id && x.estado === "activo") : null;
+  return { nombre: p.nombre, telefono: p.telefono, rol, contrato_id: c?.id ?? null, inmueble: c?.inmueble_direccion || "" };
+}
+
+function quienEs(telNormalizado) {
+  for (const [tabla, rol] of [["inquilinos", "Inquilino"], ["propietarios", "Propietario"], ["garantes", "Garante"]]) {
+    const p = state[tabla].find((x) => telefonoWhatsapp(x.telefono, cfg("wa_codigo_area")) === telNormalizado);
+    if (p) return `${p.nombre} (${rol})`;
+  }
+  return telNormalizado || "-";
+}
+
+function renderHistorialMensajes() {
+  const lista = state.recordatorios;
+  $("avisos-lista").innerHTML = `<p class="hint">Mensajes enviados desde la app en los últimos meses, desde todas las PCs.</p>
+    <div class="table-wrap"><table class="data-table"><thead><tr><th>Fecha</th><th>Para</th><th>Tipo</th><th>Mensaje</th><th>Envió</th></tr></thead><tbody>${
+      lista.length
+        ? lista
+            .map(
+              (r) => `<tr><td>${fmtDate(r.fecha)}</td><td>${esc(quienEs(r.telefono))}</td><td><span class="pill pill-gris">${esc(TIPO_AVISO_TXT[r.tipo] || r.tipo)}</span></td>
+          <td><div class="aviso-row-msg">${esc((r.mensaje || "").slice(0, 220))}${(r.mensaje || "").length > 220 ? "…" : ""}</div></td><td>${esc(r.usuario || "")}</td></tr>`
+            )
+            .join("")
+        : vacio(5, "Todavía no se enviaron mensajes")
+    }</tbody></table></div>`;
+}
+
+const MENSAJES_RAPIDOS = [
+  ["Saludo", "Hola {nombre}! Te escribimos de {inmobiliaria}. "],
+  ["Recordatorio de pago", "Hola {nombre}! Te recordamos que el alquiler de {inmueble} vence en estos días. ¡Gracias!"],
+  ["Visita / reparación", "Hola {nombre}! Te escribimos de {inmobiliaria} para coordinar una visita a {inmueble}. ¿Qué día y horario te queda cómodo?"],
+  ["Pasar por la oficina", "Hola {nombre}! Cuando puedas, acercate por nuestra oficina en {direccion}. ¡Muchas gracias!"],
+];
+
+$("btn-mensaje-varios").addEventListener("click", () => abrirMensajeVarios());
+
+function abrirMensajeVarios() {
+  const grupos = {
+    inquilinos_activos: ["Inquilinos con contrato activo", contratosActivos().map((c) => destinatarioDe("inquilinos", inquilinoDe(c))).filter((d) => d.nombre)],
+    propietarios: ["Todos los propietarios", state.propietarios.map((p) => destinatarioDe("propietarios", p))],
+    garantes: ["Garantes de contratos activos", [...new Set(contratosActivos().flatMap((c) => c.garante_ids))].map((id) => byId(state.garantes, id)).filter(Boolean).map((g) => destinatarioDe("garantes", g))],
+  };
+  openModal({
+    title: "Mensaje a varios",
+    html: `<p class="hint">Elegí a quiénes. Después se abre WhatsApp con cada chat de a uno, con el mensaje listo; vos tocás enviar y seguís con el siguiente.</p>
+      <div class="form-grid">${Object.entries(grupos)
+        .map(([k, [label, lista]]) => `<label class="pago-op" style="text-align:left;display:flex;gap:8px;align-items:center"><input type="radio" name="grupo-msg" value="${k}" ${k === "inquilinos_activos" ? "checked" : ""}/> ${esc(label)} <span class="pill pill-gris">${lista.length}</span></label>`)
+        .join("")}</div>`,
+    saveLabel: "Continuar",
+    onSave: async () => {
+      const k = document.querySelector('input[name="grupo-msg"]:checked')?.value;
+      const lista = grupos[k][1].filter((d) => telefonoWhatsapp(d.telefono, cfg("wa_codigo_area")));
+      if (!lista.length) throw new Error("Ninguno tiene teléfono cargado");
+      setTimeout(() => abrirMensaje(lista), 0);
+    },
+  });
+}
+
+/** Mensaje libre a uno o varios destinatarios [{nombre, telefono, rol, contrato_id, inmueble}]. */
+function abrirMensaje(destinatarios, textoInicial = "") {
+  const varios = destinatarios.length > 1;
+  let indice = 0;
+  const html = `
+    ${varios ? `<div class="aviso-info" id="msg-progreso"></div>` : `<p class="hint">Para <b>${esc(destinatarios[0].nombre)}</b> (${esc(destinatarios[0].rol || "")}) · ${esc(destinatarios[0].telefono)}</p>`}
+    <div class="chips" style="margin-bottom:8px">${MENSAJES_RAPIDOS.map(([t], i) => `<button type="button" class="chip" data-rapido="${i}">${esc(t)}</button>`).join("")}</div>
+    <div class="form-field"><label>Mensaje ${varios ? "(<code>{nombre}</code> se reemplaza por el nombre de cada uno)" : ""}</label>
+      <textarea id="msg-texto" rows="6" placeholder="Escribí el mensaje…">${esc(textoInicial)}</textarea></div>
+    <p class="hint" style="margin-top:8px">Se abre en ${cfg("wa_modo") === "web" ? "WhatsApp Web" : "la app de WhatsApp de esta PC"}, que tiene que estar vinculada con el número de la inmobiliaria (${esc(cfg("wa_inmobiliaria"))}).</p>`;
+  const datos = (d) => ({
+    ...datosBaseMensaje(),
+    nombre: primerNombre(d.nombre),
+    inmueble: d.inmueble || "la propiedad",
+    direccion: `${cfg("inmobiliaria_direccion")}, ${cfg("inmobiliaria_localidad")}`,
+  });
+  const pintarProgreso = () => {
+    if (!varios) return;
+    const d = destinatarios[indice];
+    $("msg-progreso").innerHTML = indice < destinatarios.length ? `Siguiente: <b>${esc(d.nombre)}</b> (${indice + 1} de ${destinatarios.length})` : "✓ Listo, se abrieron todos los chats.";
+    modalSave.textContent = indice < destinatarios.length ? `Abrir chat ${indice + 1} de ${destinatarios.length}` : "Terminar";
+  };
+  openModal({
+    title: varios ? `Mensaje a ${destinatarios.length} personas` : "Mensaje por WhatsApp",
+    html,
+    saveLabel: "Abrir en WhatsApp",
+    onMount: () => {
+      pintarProgreso();
+      modalBody.querySelectorAll("[data-rapido]").forEach((b) =>
+        b.addEventListener("click", () => {
+          $("msg-texto").value = MENSAJES_RAPIDOS[Number(b.dataset.rapido)][1];
+          $("msg-texto").focus();
+        })
+      );
+      setTimeout(() => $("msg-texto").focus(), 50);
+    },
+    onSave: async () => {
+      if (varios && indice >= destinatarios.length) return;
+      const texto = $("msg-texto").value.trim();
+      if (!texto) throw new Error("Escribí el mensaje");
+      const d = destinatarios[indice];
+      await enviarWhatsapp({ telefono: d.telefono, nombre: d.nombre, contrato_id: d.contrato_id, tipo: "mensaje", referencia: hoyIso(), mensaje: completarPlantilla(texto, datos(d)) });
+      if (!varios) return;
+      indice++;
+      pintarProgreso();
+      return false; // el modal queda abierto para el siguiente
+    },
+  });
 }
 
 // ---------- Central de Deudores (BCRA) ----------
@@ -844,7 +974,7 @@ function renderPersonas(tabla) {
           ? `<td>${esc(p.nombre)}${p.tiene_fotos_dni ? ' <span class="pill pill-gold" title="DNI escaneado">DNI</span>' : ""}${extraBcra}</td><td>${doc}</td><td>${esc(p.telefono)}</td><td>${esc(p.tipo_garantia || "-")}</td><td>${vinc}</td>`
           : `<td>${esc(p.nombre)}${p.tiene_fotos_dni ? ' <span class="pill pill-gold" title="DNI escaneado">DNI</span>' : ""}${extraBcra}</td><td>${doc}</td><td>${esc(p.telefono)}</td><td>${esc(p.email)}</td><td>${vinc}</td>`;
       return `<tr>${cols}<td class="actions">
-        ${p.telefono ? `<button class="btn-icon wa" title="Abrir chat" data-chat="${tabla}:${p.id}">${ICONO_WA}</button>` : ""}
+        ${p.telefono ? `<button class="btn-icon wa" title="Enviar mensaje por WhatsApp" data-chat="${tabla}:${p.id}">${ICONO_WA}</button>` : ""}
         <button class="btn-link" data-edit-persona="${tabla}:${p.id}">Editar</button>
         <button class="btn-link peligro" data-del-persona="${tabla}:${p.id}">Eliminar</button></td></tr>`;
     })
@@ -870,9 +1000,8 @@ document.addEventListener("click", async (e) => {
   if (b.dataset.chat) {
     const [tabla, id] = b.dataset.chat.split(":");
     const p = byId(state[tabla], Number(id));
-    const tel = telefonoWhatsapp(p?.telefono, cfg("wa_codigo_area"));
-    if (tel) await call("abrir_enlace", { url: `https://wa.me/${tel}` });
-    else toast("El teléfono cargado no parece válido", true);
+    if (!telefonoWhatsapp(p?.telefono, cfg("wa_codigo_area"))) return toast("El teléfono cargado no parece válido", true);
+    abrirMensaje([destinatarioDe(tabla, p)]);
   }
 });
 
@@ -2523,11 +2652,24 @@ async function renderConfig() {
     ];
     body.innerHTML = `<div class="cfg-grid">
       <div class="panel"><h3>Datos generales</h3><div class="form-grid">
+        ${campoCfg("wa_inmobiliaria", "WhatsApp de la inmobiliaria", { hint: "Sale en recibos y documentos. Es el número vinculado en la app de WhatsApp de cada PC." })}
+        <div class="form-field"><label>Abrir los chats en</label><select data-cfg="wa_modo">
+          ${[["app", "App de WhatsApp de la PC (recomendado)"], ["web", "WhatsApp Web (navegador)"], ["wame", "Enlace wa.me (pregunta cada vez)"]].map(([v, l]) => `<option value="${v}" ${(cfgBorrador.wa_modo ?? cfg("wa_modo")) === v ? "selected" : ""}>${l}</option>`).join("")}
+        </select></div>
         ${campoCfg("wa_codigo_area", "Característica por defecto", { hint: "Para teléfonos cargados sin característica (ej. 3468)" })}
         ${campoCfg("aviso_dias_antes", "Recordar el pago con (días de anticipación)", { type: "number" })}
         ${campoCfg("wa_datos_pago", "Datos para transferir (van en {datos_pago})", { full: true, type: "textarea", placeholder: "Alias: CARRANZA.INMO · CBU 0000… · Titular: …" })}
       </div>
-      <p class="hint" style="margin-top:14px">Los mensajes se abren en WhatsApp (app o web) con el texto listo; solo tenés que tocar enviar. Para mandar el recibo, guardalo en PDF y adjuntalo en el chat.</p></div>
+      <div class="wa-guia">
+        <b>Vincular el WhatsApp de la inmobiliaria en esta PC (una vez por PC):</b>
+        <ol>
+          <li>Instalá <b>WhatsApp</b> desde la Microsoft Store (o desde whatsapp.com/download).</li>
+          <li>Abrilo: muestra un código QR.</li>
+          <li>En el celular de la inmobiliaria: WhatsApp (o WhatsApp Business) → <b>⋮ → Dispositivos vinculados → Vincular un dispositivo</b> y escaneá el código.</li>
+          <li>Listo: los mensajes que mandes desde esta app salen desde el número de la inmobiliaria, y las respuestas de inquilinos y propietarios te llegan ahí y al celular. Se pueden vincular hasta 4 PCs.</li>
+        </ol>
+        <button type="button" class="btn-secondary btn-sm" id="cfg-wa-probar">Probar: abrir chat con el número de la inmobiliaria</button>
+      </div></div>
       <div class="panel"><h3>Mensajes</h3><div class="form-grid">${plantillas
         .map(
           ([k, label]) => `<div class="form-field full plantilla"><label>${label}</label><textarea data-cfg="${k}">${esc(cfgBorrador[k] ?? cfg(k))}</textarea>
@@ -2542,6 +2684,14 @@ async function renderConfig() {
         ta.focus();
       })
     );
+    $("cfg-wa-probar").addEventListener("click", async () => {
+      guardarBorradorConfig();
+      const tel = telefonoWhatsapp(cfgBorrador.wa_inmobiliaria ?? cfg("wa_inmobiliaria"), cfg("wa_codigo_area"));
+      if (!tel) return toast("El número de la inmobiliaria no parece válido", true);
+      const modo = cfgBorrador.wa_modo ?? cfg("wa_modo");
+      const url = modo === "web" ? `https://web.whatsapp.com/send?phone=${tel}` : modo === "wame" ? `https://wa.me/${tel}` : `whatsapp://send?phone=${tel}`;
+      await call("abrir_enlace", { url });
+    });
   } else if (cfgTab === "ipc") {
     body.innerHTML = `<p class="hint">Cargando datos del INDEC…</p>`;
     let ipc;

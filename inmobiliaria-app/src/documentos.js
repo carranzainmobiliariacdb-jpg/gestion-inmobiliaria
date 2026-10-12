@@ -15,7 +15,7 @@ function encabezado(cfg, titulo = "", numero = "") {
       <div class="dm-marca">
         <span class="dm-nombre">${esc((cfg.inmobiliaria_nombre || "CARRANZA Inmobiliaria").replace(/\s*inmobiliaria\s*/i, ""))}</span>
         <span class="dm-sub">INMOBILIARIA${cfg.inmobiliaria_matricula ? ` · ${esc(cfg.inmobiliaria_matricula)}` : ""}</span>
-        <span class="dm-contacto">${[cfg.inmobiliaria_direccion && `${esc(cfg.inmobiliaria_direccion)}${cfg.inmobiliaria_localidad ? `, ${esc(cfg.inmobiliaria_localidad)}` : ""}`, cfg.inmobiliaria_telefono && `Tel. ${esc(cfg.inmobiliaria_telefono)}`, esc(cfg.inmobiliaria_email || "")].filter(Boolean).join(" · ")}</span>
+        <span class="dm-contacto">${[cfg.inmobiliaria_direccion && `${esc(cfg.inmobiliaria_direccion)}${cfg.inmobiliaria_localidad ? `, ${esc(cfg.inmobiliaria_localidad)}` : ""}`, cfg.inmobiliaria_telefono && `Tel. ${esc(cfg.inmobiliaria_telefono)}`, cfg.wa_inmobiliaria && `WhatsApp ${esc(cfg.wa_inmobiliaria)}`, esc(cfg.inmobiliaria_email || "")].filter(Boolean).join(" · ")}</span>
       </div>
       ${titulo ? `<div class="dm-titulo"><span>${esc(titulo)}</span>${numero !== "" ? `<b>N° ${esc(numero)}</b>` : ""}</div>` : ""}
     </div>`;
@@ -107,7 +107,7 @@ function mitadRecibo(r, cfg, copia) {
       <span class="rm-copia ${esOriginal ? "rm-original" : ""}">${copia}</span>
       <div class="rm-firma">${esOriginal ? "Firma y sello" : "Recibí copia — firma del inquilino"}</div>
     </div>
-    <div class="rm-legal">${[cfg.inmobiliaria_direccion && `${esc(cfg.inmobiliaria_direccion)}${cfg.inmobiliaria_localidad ? `, ${esc(cfg.inmobiliaria_localidad)}` : ""}`, cfg.inmobiliaria_telefono && `Tel. ${esc(cfg.inmobiliaria_telefono)}`, esc(cfg.inmobiliaria_email || "")].filter(Boolean).join(" · ")}
+    <div class="rm-legal">${[cfg.inmobiliaria_direccion && `${esc(cfg.inmobiliaria_direccion)}${cfg.inmobiliaria_localidad ? `, ${esc(cfg.inmobiliaria_localidad)}` : ""}`, cfg.inmobiliaria_telefono && `Tel. ${esc(cfg.inmobiliaria_telefono)}`, cfg.wa_inmobiliaria && `WhatsApp ${esc(cfg.wa_inmobiliaria)}`, esc(cfg.inmobiliaria_email || "")].filter(Boolean).join(" · ")}
       <span>Impreso ${fmtDate(hoyIso())}${r.usuario ? ` · ${esc(r.usuario)}` : ""}</span></div>
   </div>`;
 }

@@ -62,6 +62,10 @@ PCs que se conecten al mismo proyecto ven y cargan los mismos datos.
   inspección…) y acta de constatación de estado con las fotos para imprimir.
 - **Central de Deudores del BCRA** para inquilinos y garantes (API pública
   `api.bcra.gob.ar/CentralDeDeudores/v1.0`), guardando la última consulta.
+- **WhatsApp de la inmobiliaria**: los chats se abren en la app de WhatsApp
+  de la PC (vinculada con el número de la inmobiliaria como dispositivo),
+  mensaje libre a cualquier persona, mensaje a varios (inquilinos activos,
+  propietarios, garantes) e historial de mensajes enviados.
 - **Configuración** compartida entre PCs: datos de la inmobiliaria, logo y
   numeración del recibo, mensajes de WhatsApp, IPC manual.
 - **Login** con usuarios compartidos entre todas las PCs.
