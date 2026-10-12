@@ -1,0 +1,48 @@
+name: Build instalador Windows (Inmobiliaria App)
+
+on:
+  workflow_dispatch:
+  push:
+    paths:
+      - "inmobiliaria-app/**"
+      - ".github/workflows/build-inmobiliaria-windows.yml"
+
+permissions:
+  contents: write
+
+jobs:
+  build:
+    runs-on: windows-latest
+    defaults:
+      run:
+        working-directory: inmobiliaria-app
+    steps:
+      - uses: actions/checkout@v4
+
+      - uses: dtolnay/rust-toolchain@stable
+
+      - uses: actions/setup-node@v4
+        with:
+          node-version: 20
+
+      - name: Instalar dependencias del frontend
+        run: npm install
+
+      # Publica un GitHub Release con el instalador firmado + latest.json —
+      # así el updater automático de la app (ver revisar_actualizaciones en
+      # src-tauri/src/commands.rs) tiene de dónde leer la última versión.
+      - name: Compilar y publicar el release (instalador + updater)
+        uses: tauri-apps/tauri-action@v0
+        env:
+          GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}
+          TAURI_SIGNING_PRIVATE_KEY: ${{ secrets.TAURI_SIGNING_PRIVATE_KEY }}
+          TAURI_SIGNING_PRIVATE_KEY_PASSWORD: ${{ secrets.TAURI_SIGNING_PRIVATE_KEY_PASSWORD }}
+          INMOBILIARIA_SUPABASE_URL: ${{ secrets.INMOBILIARIA_SUPABASE_URL }}
+          INMOBILIARIA_SUPABASE_ANON_KEY: ${{ secrets.INMOBILIARIA_SUPABASE_ANON_KEY }}
+        with:
+          projectPath: inmobiliaria-app
+          tagName: v__VERSION__
+          releaseName: "Gestión Inmobiliaria v__VERSION__"
+          releaseBody: "Instalador para Windows. La app se actualiza sola a partir de esta versión."
+          releaseDraft: false
+          prerelease: false
