@@ -167,3 +167,149 @@ export function dataUrlABlob(dataUrl) {
   for (let i = 0; i < bin.length; i++) arr[i] = bin.charCodeAt(i);
   return new Blob([arr], { type: mime });
 }
+
+// ---------- Plan B: leer las 3 líneas MRZ del dorso (IDARG…<<<) ----------
+//
+// Si el código de barras no se puede leer (foto movida, reflejo), el dorso
+// del DNI tarjeta tiene abajo tres renglones con letras, números y "<" que
+// también traen apellido, nombres, DNI, sexo y fecha de nacimiento. Se leen
+// con reconocimiento de texto (Tesseract, incluido en la app, sin internet).
+
+let ocrListo = null;
+
+function cargarOcr() {
+  if (ocrListo) return ocrListo;
+  ocrListo = new Promise((resolve, reject) => {
+    const crear = async () => {
+      try {
+        const base = new URL("vendor/tesseract/", location.href).href;
+        const worker = await window.Tesseract.createWorker("eng", 1, {
+          workerPath: base + "worker.min.js",
+          corePath: base + "tesseract-core-simd-lstm.wasm.js",
+          langPath: base.replace(/\/$/, ""),
+          workerBlobURL: false,
+          gzip: true,
+        });
+        await worker.setParameters({
+          tessedit_char_whitelist: "ABCDEFGHIJKLMNOPQRSTUVWXYZ0123456789<",
+          preserve_interword_spaces: "0",
+        });
+        resolve(worker);
+      } catch (e) {
+        ocrListo = null;
+        reject(e);
+      }
+    };
+    if (window.Tesseract) return crear();
+    const s = document.createElement("script");
+    s.src = "vendor/tesseract/tesseract.min.js";
+    s.onload = crear;
+    s.onerror = () => {
+      ocrListo = null;
+      reject(new Error("No se pudo cargar el lector de texto"));
+    };
+    document.head.appendChild(s);
+  });
+  return ocrListo;
+}
+
+const DIGITO_DE = { O: "0", Q: "0", D: "0", I: "1", L: "1", Z: "2", S: "5", B: "8", G: "6", T: "7" };
+const comoDigitos = (s) => s.replace(/[OQDILZSBGT]/g, (c) => DIGITO_DE[c]);
+
+/** Dígito verificador MRZ (pesos 7-3-1). */
+function digitoMrz(s) {
+  const pesos = [7, 3, 1];
+  let suma = 0;
+  for (let i = 0; i < s.length; i++) {
+    const c = s[i];
+    let v = 0;
+    if (c >= "0" && c <= "9") v = c.charCodeAt(0) - 48;
+    else if (c >= "A" && c <= "Z") v = c.charCodeAt(0) - 55;
+    suma += v * pesos[i % 3];
+  }
+  return String(suma % 10);
+}
+
+/**
+ * Interpreta el texto OCR de la zona MRZ de un DNI argentino (formato TD1:
+ * 3 renglones de 30 caracteres). Tolera errores típicos del OCR (O/0, I/1…)
+ * y valida con los dígitos verificadores cuando puede.
+ */
+export function interpretarMrz(texto) {
+  if (!texto) return null;
+  const lineas = texto
+    .toUpperCase()
+    .split(/\r?\n/)
+    .map((l) => l.replace(/[^A-Z0-9<]/g, ""))
+    .filter((l) => l.length >= 20);
+  const i1 = lineas.findIndex((l) => /^[I1][DO0]AR[G6]/.test(l));
+  if (i1 < 0 || lineas.length < i1 + 3) return null;
+  const [l1, l2, l3] = lineas.slice(i1, i1 + 3);
+
+  // Renglón 1: IDARG + número de documento (9) + verificador
+  const docCrudo = comoDigitos(l1.slice(5, 14)).replace(/</g, "");
+  const dni = docCrudo.replace(/^0+/, "");
+  // Renglón 2: nacimiento AAMMDD + verif + sexo + vencimiento AAMMDD + verif + ARG
+  const nac = comoDigitos(l2.slice(0, 6));
+  const sexo = (l2[7] || "").replace("H", "M");
+  // Renglón 3: APELLIDO<<NOMBRES<NOMBRE
+  const [ap, nom = ""] = l3.split("<<");
+  const apellido = ap.replace(/</g, " ").replace(/[0-9]/g, "").trim();
+  const nombres = nom.replace(/</g, " ").replace(/[0-9]/g, "").trim();
+
+  if (!/^\d{7,8}$/.test(dni) || !/^\d{6}$/.test(nac) || !apellido) return null;
+  const okDni = digitoMrz(comoDigitos(l1.slice(5, 14))) === comoDigitos(l1[14] || "");
+  const okNac = digitoMrz(nac) === comoDigitos(l2[6] || "");
+
+  const aa = Number(nac.slice(0, 2));
+  const anioActual = new Date().getFullYear() % 100;
+  const siglo = aa > anioActual ? 1900 : 2000;
+  const fecha_nacimiento = `${siglo + aa}-${nac.slice(2, 4)}-${nac.slice(4, 6)}`;
+  const sx = ["M", "F", "X"].includes(sexo) ? sexo : "";
+  const datos = {
+    dni,
+    apellido,
+    nombres,
+    sexo: sx,
+    fecha_nacimiento,
+    nacionalidad: "ARGENTINA",
+    nombre_completo: `${apellido} ${nombres}`.trim(),
+    verificado: okDni && okNac,
+    origen: "mrz",
+  };
+  datos.cuil = calcularCuil(dni, sx);
+  return datos;
+}
+
+/** Lee la zona MRZ del dorso. Devuelve los datos o null. */
+export async function leerMrzDni(blob) {
+  const worker = await cargarOcr();
+  const img = await cargarImagen(blob);
+  // La MRZ ocupa el tercio inferior del dorso: se prueba la imagen entera y
+  // el recorte de abajo, en escala de grises, y también rotada 180° por si
+  // la foto quedó dada vuelta.
+  const intentos = [];
+  const base = dibujar(img, 2000, true);
+  intentos.push(base);
+  const recorte = document.createElement("canvas");
+  recorte.width = base.width;
+  recorte.height = Math.round(base.height * 0.45);
+  recorte.getContext("2d").drawImage(base, 0, base.height - recorte.height, base.width, recorte.height, 0, 0, recorte.width, recorte.height);
+  intentos.unshift(recorte);
+  const girada = document.createElement("canvas");
+  girada.width = base.width;
+  girada.height = base.height;
+  const g = girada.getContext("2d");
+  g.translate(base.width, base.height);
+  g.rotate(Math.PI);
+  g.drawImage(base, 0, 0);
+  intentos.push(girada);
+  let mejor = null;
+  for (const c of intentos) {
+    const { data } = await worker.recognize(c);
+    const d = interpretarMrz(data.text);
+    if (d && d.verificado) return d;
+    if (d && !mejor) mejor = d;
+  }
+  return mejor;
+}

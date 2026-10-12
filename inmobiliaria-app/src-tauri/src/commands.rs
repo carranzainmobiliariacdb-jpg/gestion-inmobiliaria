@@ -266,6 +266,7 @@ const COLS_PERSONA: &[&str] = &[
 const COLS_FOTOS_DNI: &[&str] = &["dni_frente", "dni_dorso"];
 const COLS_SOLO_PROPIETARIO: &[&str] = &["datos_bancarios"];
 const COLS_SOLO_GARANTE: &[&str] = &["tipo_garantia", "detalle_garantia"];
+const COLS_BCRA: &[&str] = &["bcra_situacion", "bcra_fecha", "bcra_detalle"];
 const COLS_INMUEBLE: &[&str] = &[
     "propietario_id", "codigo", "direccion", "piso_depto", "localidad", "provincia", "codigo_postal", "tipo", "destino",
     "estado", "superficie", "superficie_cubierta", "ambientes", "dormitorios", "banos", "cochera", "patio", "amoblado",
@@ -276,8 +277,8 @@ const COLS_INMUEBLE: &[&str] = &[
 fn columnas_de(tabla: &str) -> Result<Vec<&'static str>, String> {
     let mut cols: Vec<&'static str> = match tabla {
         "propietarios" => [COLS_PERSONA, COLS_SOLO_PROPIETARIO].concat(),
-        "inquilinos" => COLS_PERSONA.to_vec(),
-        "garantes" => [COLS_PERSONA, COLS_SOLO_GARANTE].concat(),
+        "inquilinos" => [COLS_PERSONA, COLS_BCRA].concat(),
+        "garantes" => [COLS_PERSONA, COLS_SOLO_GARANTE, COLS_BCRA].concat(),
         "inmuebles" => COLS_INMUEBLE.to_vec(),
         _ => return Err(format!("Tabla no permitida: {}", tabla)),
     };
@@ -919,6 +920,91 @@ pub async fn get_comprobante(state: State<'_, DbState>, numero: i64) -> Result<V
     Ok(filas)
 }
 
+// ---------- Central de Deudores del BCRA ----------
+
+/// Consulta la situación crediticia de un CUIT/CUIL. Si se pasa la persona
+/// (tabla + id), guarda el resultado en su ficha.
+#[tauri::command]
+pub async fn consultar_bcra(state: State<'_, DbState>, cuit: String, tabla: Option<String>, id: Option<i64>) -> Result<Value, String> {
+    let resultado = crate::bcra::consultar(&cuit).await?;
+    if let (Some(tabla), Some(id)) = (tabla, id) {
+        if ["inquilinos", "garantes"].contains(&tabla.as_str()) {
+            let cliente = obtener_cliente(&state).await?;
+            let body = json!({
+                "bcra_situacion": resultado["situacion"],
+                "bcra_fecha": today().format("%Y-%m-%d").to_string(),
+                "bcra_detalle": resultado,
+            });
+            cliente.update(&tabla, &format!("id=eq.{}", id), &body).await.map_err(map_err)?;
+        }
+    }
+    Ok(resultado)
+}
+
+// ---------- Fotos del estado de los inmuebles ----------
+
+/// Lista de fotos de un inmueble, solo con la miniatura (la foto grande se
+/// pide aparte con get_foto_inmueble).
+#[tauri::command]
+pub async fn get_fotos_inmueble(state: State<'_, DbState>, inmueble_id: i64) -> Result<Vec<Value>, String> {
+    let cliente = obtener_cliente(&state).await?;
+    cliente
+        .select(
+            "inmueble_fotos",
+            &format!("inmueble_id=eq.{}&select=id,inmueble_id,contrato_id,tipo,descripcion,fecha,miniatura,usuario&order=fecha.desc,id", inmueble_id),
+        )
+        .await
+        .map_err(map_err)
+}
+
+#[tauri::command]
+pub async fn get_foto_inmueble(state: State<'_, DbState>, id: i64) -> Result<Value, String> {
+    let cliente = obtener_cliente(&state).await?;
+    let f: Option<Value> = cliente.select_uno("inmueble_fotos", &format!("id=eq.{}&select=*", id)).await.map_err(map_err)?;
+    f.ok_or_else(|| "La foto no existe".to_string())
+}
+
+/// Fotos completas de un inmueble para imprimir el acta (opcionalmente solo de un tipo).
+#[tauri::command]
+pub async fn get_fotos_inmueble_completas(state: State<'_, DbState>, inmueble_id: i64, tipo: Option<String>) -> Result<Vec<Value>, String> {
+    let cliente = obtener_cliente(&state).await?;
+    let filtro_tipo = tipo.map(|t| format!("&tipo=eq.{}", urlencoding(&t))).unwrap_or_default();
+    cliente
+        .select("inmueble_fotos", &format!("inmueble_id=eq.{}{}&select=*&order=fecha,id", inmueble_id, filtro_tipo))
+        .await
+        .map_err(map_err)
+}
+
+#[tauri::command]
+pub async fn guardar_foto_inmueble(state: State<'_, DbState>, foto: Value) -> Result<i64, String> {
+    let cliente = obtener_cliente(&state).await?;
+    let o = foto.as_object().ok_or("Datos inválidos")?;
+    let mut body = serde_json::Map::new();
+    for k in ["inmueble_id", "contrato_id", "tipo", "descripcion", "fecha", "foto", "miniatura", "usuario"] {
+        if let Some(v) = o.get(k) {
+            body.insert(k.to_string(), v.clone());
+        }
+    }
+    match o.get("id").and_then(|v| v.as_i64()) {
+        Some(id) => {
+            body.remove("foto");
+            body.remove("miniatura");
+            cliente.update("inmueble_fotos", &format!("id=eq.{}", id), &Value::Object(body)).await.map_err(map_err)?;
+            Ok(id)
+        }
+        None => {
+            let fila: FilaId = cliente.insert("inmueble_fotos", &Value::Object(body)).await.map_err(map_err)?;
+            Ok(fila.id)
+        }
+    }
+}
+
+#[tauri::command]
+pub async fn eliminar_foto_inmueble(state: State<'_, DbState>, id: i64) -> Result<(), String> {
+    let cliente = obtener_cliente(&state).await?;
+    cliente.delete("inmueble_fotos", &format!("id=eq.{}", id)).await.map_err(map_err)
+}
+
 // ---------- Configuración, IPC y recordatorios ----------
 
 /// true si la base ya tiene las tablas/columnas de la versión 0.3.0.
@@ -935,6 +1021,9 @@ pub async fn base_actualizada(state: State<'_, DbState>) -> Result<bool, String>
         ("contratos", "select=numero,conceptos_fijos,multa_diaria&limit=1"),
         ("pagos", "select=conceptos,monto_multa,bonificacion&limit=1"),
         ("liquidaciones", "select=items,monto_cobrado&limit=1"),
+        ("inmueble_fotos", "select=id&limit=1"),
+        ("inquilinos", "select=bcra_situacion&limit=1"),
+        ("garantes", "select=bcra_detalle&limit=1"),
     ];
     for (tabla, q) in chequeos {
         if cliente.select::<Value>(tabla, q).await.is_err() {
@@ -1042,7 +1131,11 @@ pub async fn get_recordatorios(state: State<'_, DbState>, desde: String) -> Resu
 #[tauri::command]
 pub fn abrir_enlace<R: tauri::Runtime>(app: tauri::AppHandle<R>, url: String) -> Result<(), String> {
     use tauri_plugin_opener::OpenerExt;
-    if !(url.starts_with("https://wa.me/") || url.starts_with("https://api.whatsapp.com/") || url.starts_with("whatsapp://")) {
+    if !(url.starts_with("https://wa.me/")
+        || url.starts_with("https://api.whatsapp.com/")
+        || url.starts_with("whatsapp://")
+        || url.starts_with("https://www.bcra.gob.ar/"))
+    {
         return Err("Enlace no permitido".to_string());
     }
     app.opener().open_url(url, None::<&str>).map_err(map_err)

@@ -47,11 +47,26 @@ PCs que se conecten al mismo proyecto ven y cargan los mismos datos.
   atrasados, aumentos, fin de contrato y cumpleaños. Cada botón abre
   WhatsApp con el mensaje listo y queda registrado quién avisó y cuándo.
   Los mensajes se editan en Configuración.
+- **Alerta al iniciar**: contratos que vencen y aumentos que tocan desde hoy
+  hasta fin del mes que viene.
+- **DNI**: si el código de barras no se lee, se leen las 3 líneas con «<<<»
+  del dorso (OCR con [Tesseract.js](https://github.com/naptha/tesseract.js),
+  incluido en `src/vendor/tesseract`, sin internet).
+- **Fotos del inmueble**: galería por propiedad (entrega, devolución,
+  inspección…) y acta de constatación de estado con las fotos para imprimir.
+- **Central de Deudores del BCRA** para inquilinos y garantes (API pública
+  `api.bcra.gob.ar/CentralDeDeudores/v1.0`), guardando la última consulta.
 - **Configuración** compartida entre PCs: datos de la inmobiliaria, logo y
   numeración del recibo, mensajes de WhatsApp, IPC manual.
 - **Login** con usuarios compartidos entre todas las PCs.
 
-## Actualizar la base a la v0.3.0 (una sola vez)
+## Actualizar la base (una sola vez por versión)
+
+La v0.4.0 agrega la tabla de fotos y la consulta al BCRA
+([`src/migracion-0.4.0.sql`](./src/migracion-0.4.0.sql)); la app muestra
+las migraciones pendientes juntas con un botón **Copiar**.
+
+### v0.3.0
 
 La v0.3.0 agrega columnas y tablas. La primera vez que se abre, la app
 muestra el código SQL con un botón **Copiar**: se pega en Supabase → SQL

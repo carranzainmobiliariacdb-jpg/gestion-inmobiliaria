@@ -61,6 +61,15 @@ fn main() {
             let res = if cmd == "abrir_enlace" {
                 eprintln!("[WHATSAPP] {}", argumentos["url"]);
                 Ok(serde_json::Value::Null)
+            } else if cmd == "consultar_bcra" && std::env::var("BCRA_FALSO").is_ok() {
+                // Respuesta simulada (el entorno de pruebas no llega a api.bcra.gob.ar)
+                Ok(serde_json::json!({
+                    "cuit": argumentos["cuit"], "situacion": 2, "peor_historica": 3, "cantidad_cheques": 1,
+                    "deudas": {"identificacion": 27334445556i64, "denominacion": "GOMEZ CARLA BEATRIZ", "periodos": [{"periodo": "202608", "entidades": [
+                        {"entidad": "BANCO DE LA NACION ARGENTINA", "situacion": 1, "monto": 350.0, "diasAtrasoPago": 0, "refinanciaciones": false, "procesoJud": false, "situacionJuridica": false},
+                        {"entidad": "TARJETA NARANJA S.A.", "situacion": 2, "monto": 120.5, "diasAtrasoPago": 45, "refinanciaciones": true, "procesoJud": false, "situacionJuridica": false}]}]},
+                    "historicas": null, "cheques": null
+                }))
             } else if ["revisar_actualizaciones", "maximizar_ventana", "minimizar_ventana", "cerrar_ventana"].contains(&cmd.as_str()) {
                 Ok(serde_json::Value::Null)
             } else {

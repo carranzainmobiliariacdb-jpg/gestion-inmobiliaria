@@ -180,3 +180,28 @@ export function htmlLiquidacion(filas, cfg) {
     <div class="liq-pie">Impreso: ${fmtDate(hoyIso())}${f0.usuario ? ` · Usuario: ${esc(f0.usuario.toUpperCase())}` : ""}</div>
   </div>`;
 }
+
+/** Acta de constatación del estado del inmueble con sus fotos. */
+export function htmlActaFotos({ inmueble, contrato, fotos, tipo, fecha }, cfg) {
+  const dir = [inmueble.direccion, inmueble.piso_depto].filter(Boolean).join(" ");
+  const items = fotos
+    .map(
+      (f, i) => `<div class="acta-foto"><img src="${f.foto}" alt="" /><div><b>${i + 1}.</b> ${esc(f.descripcion || "")} <span style="color:#666">(${fmtDate(f.fecha)})</span></div></div>`
+    )
+    .join("");
+  return `<div class="doc doc-acta">
+    ${encabezado(cfg)}
+    <div class="acta-cuerpo">
+      <h2>Acta de constatación del estado del inmueble${tipo ? ` — ${esc(tipo)}` : ""}</h2>
+      <div class="acta-datos">
+        <div><label>Inmueble:</label> <b>${inmueble.codigo != null ? esc(inmueble.codigo) + " - " : ""}${esc(dir)}</b>${inmueble.localidad ? `, ${esc(inmueble.localidad)}` : ""}</div>
+        <div><label>Fecha:</label> <b>${fmtDate(fecha)}</b></div>
+        <div><label>Propietario:</label> <b>${esc(inmueble.propietario_nombre || "")}</b></div>
+        <div><label>Inquilino:</label> <b>${esc(contrato?.inquilino_nombre || "-")}</b>${contrato?.numero ? ` (contrato N° ${esc(contrato.numero)})` : ""}</div>
+      </div>
+      <p style="margin:0 0 10px">Las partes dejan constancia de que el inmueble se encuentra en el estado que muestran las ${fotos.length} fotografías siguientes, que forman parte del contrato de locación.</p>
+      <div class="acta-fotos">${items}</div>
+      <div class="acta-firmas"><div>Locador / ${esc(cfg.inmobiliaria_nombre || "Inmobiliaria")}</div><div>Locatario</div></div>
+    </div>
+  </div>`;
+}

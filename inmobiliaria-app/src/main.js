@@ -2,8 +2,8 @@ import {
   esc, money, numero, fmtDate, hoyIso, periodoTexto, periodoTitulo, sumarMeses, mesDeContrato, vencimientoDe, diasEntre,
   montoEnLetras, telefonoWhatsapp, enlaceWhatsapp, completarPlantilla, primerNombre, serieIpcCompleta, calcularIpc,
 } from "./util.js";
-import { leerCodigoDni, interpretarCodigoDni, comprimirFoto } from "./dni.js";
-import { htmlRecibo, htmlLiquidacion, totalesRecibo, totalesLiquidacion } from "./documentos.js";
+import { leerCodigoDni, interpretarCodigoDni, leerMrzDni, comprimirFoto, calcularCuil } from "./dni.js";
+import { htmlRecibo, htmlLiquidacion, htmlActaFotos, totalesRecibo, totalesLiquidacion } from "./documentos.js";
 
 const invoke = window.__TAURI__.core.invoke;
 
@@ -739,6 +739,42 @@ function actualizarBadges() {
   }
 }
 
+// ---------- Central de Deudores (BCRA) ----------
+
+const SITUACIONES_BCRA = {
+  0: ["Sin deudas informadas", "pill-ok"],
+  1: ["1 · Normal", "pill-ok"],
+  2: ["2 · Riesgo bajo / seguimiento", "pill-warning"],
+  3: ["3 · Riesgo medio / con problemas", "pill-danger"],
+  4: ["4 · Riesgo alto", "pill-danger"],
+  5: ["5 · Irrecuperable", "pill-danger"],
+  6: ["6 · Irrecuperable por disposición técnica", "pill-danger"],
+};
+
+function pillBcra(sit, corto = false) {
+  if (sit == null) return "";
+  const [txt, cls] = SITUACIONES_BCRA[sit] || [`Situación ${sit}`, "pill-gris"];
+  return `<span class="pill ${cls}" title="Central de Deudores BCRA">${corto ? (sit === 0 ? "BCRA ✓" : "BCRA " + sit) : txt}</span>`;
+}
+
+function htmlBcra(r, fecha) {
+  const ents = r.deudas?.periodos?.[0]?.entidades || [];
+  const periodo = r.deudas?.periodos?.[0]?.periodo;
+  const total = ents.reduce((a, e) => a + Number(e.monto || 0), 0);
+  const filas = ents
+    .map(
+      (e) => `<tr><td>${esc(e.entidad)}</td><td>${pillBcra(e.situacion)}</td><td class="num">${money(Number(e.monto || 0) * 1000)}</td>
+      <td>${e.diasAtrasoPago ? e.diasAtrasoPago + " días" : "-"}</td><td>${[e.refinanciaciones && "refinanciada", e.procesoJud && "proceso judicial", e.situacionJuridica && "sit. jurídica"].filter(Boolean).join(", ") || "-"}</td></tr>`
+    )
+    .join("");
+  return `<div class="bcra-resumen">
+      <div>${pillBcra(r.situacion)} ${r.deudas?.denominacion ? `<b>${esc(r.deudas.denominacion)}</b>` : ""} <span class="muted">CUIL ${esc(String(r.cuit).replace(/^(\d{2})(\d{8})(\d)$/, "$1-$2-$3"))} · consultado ${fmtDate(fecha)}</span></div>
+      <div class="muted">${periodo ? `Período informado: ${periodoTitulo(periodo.slice(0, 4) + "-" + periodo.slice(4, 6))} · ` : ""}Deuda total: <b>${money(total * 1000)}</b> ·
+        Peor situación en 24 meses: <b>${r.peor_historica || "-"}</b> · Cheques rechazados: <b style="color:${r.cantidad_cheques ? "var(--danger)" : "inherit"}">${r.cantidad_cheques}</b></div>
+    </div>
+    ${filas ? `<table class="mini-tabla" style="margin-top:8px"><thead><tr><th>Entidad</th><th>Situación</th><th class="num">Deuda</th><th>Atraso</th><th>Observaciones</th></tr></thead><tbody>${filas}</tbody></table>` : ""}`;
+}
+
 // ---------- PERSONAS (propietarios, inquilinos, garantes) ----------
 
 const PERSONA = {
@@ -799,10 +835,11 @@ function renderPersonas(tabla) {
         vinc = cs.length ? cs.map((c) => esc(c.inquilino_nombre)).join("<br/>") : '<span class="muted">—</span>';
       }
       const doc = [p.dni_cuit, p.cuit_cuil].filter(Boolean).map(esc).join("<span class='sub-line'>") + (p.dni_cuit && p.cuit_cuil ? "</span>" : "");
+      const extraBcra = p.bcra_situacion != null ? " " + pillBcra(p.bcra_situacion, true) : "";
       const cols =
         tabla === "garantes"
-          ? `<td>${esc(p.nombre)}${p.tiene_fotos_dni ? ' <span class="pill pill-gold" title="DNI escaneado">DNI</span>' : ""}</td><td>${doc}</td><td>${esc(p.telefono)}</td><td>${esc(p.tipo_garantia || "-")}</td><td>${vinc}</td>`
-          : `<td>${esc(p.nombre)}${p.tiene_fotos_dni ? ' <span class="pill pill-gold" title="DNI escaneado">DNI</span>' : ""}</td><td>${doc}</td><td>${esc(p.telefono)}</td><td>${esc(p.email)}</td><td>${vinc}</td>`;
+          ? `<td>${esc(p.nombre)}${p.tiene_fotos_dni ? ' <span class="pill pill-gold" title="DNI escaneado">DNI</span>' : ""}${extraBcra}</td><td>${doc}</td><td>${esc(p.telefono)}</td><td>${esc(p.tipo_garantia || "-")}</td><td>${vinc}</td>`
+          : `<td>${esc(p.nombre)}${p.tiene_fotos_dni ? ' <span class="pill pill-gold" title="DNI escaneado">DNI</span>' : ""}${extraBcra}</td><td>${doc}</td><td>${esc(p.telefono)}</td><td>${esc(p.email)}</td><td>${vinc}</td>`;
       return `<tr>${cols}<td class="actions">
         ${p.telefono ? `<button class="btn-icon wa" title="Abrir chat" data-chat="${tabla}:${p.id}">${ICONO_WA}</button>` : ""}
         <button class="btn-link" data-edit-persona="${tabla}:${p.id}">Editar</button>
@@ -844,17 +881,27 @@ function abrirPersona(tabla, id = null, valoresIniciales = {}) {
     const fotos = { frente: undefined, dorso: undefined }; // undefined = sin cambios
     const dniBox = `
       <div class="dni-box">
-        <div class="dni-box-top"><b>📷 Cargar desde el DNI</b><small class="muted">Arrastrá, hacé clic o pegá (Ctrl+V) la foto. Se leen los datos del código de barras.</small></div>
+        <div class="dni-box-top"><b>📷 Cargar desde el DNI</b><small class="muted">Arrastrá, hacé clic o pegá (Ctrl+V) las fotos de las dos caras. Los datos se completan solos abajo.</small></div>
         <div class="dni-fotos">
           <div class="dni-slot" data-lado="frente"><span>Frente del DNI</span></div>
           <div class="dni-slot" data-lado="dorso"><span>Dorso del DNI</span></div>
         </div>
         <div class="dni-codigo"><input type="text" id="dni-texto" placeholder="…o pegá acá el texto leído con un lector de códigos (ej. 00123456789@PEREZ@JUAN@M@…)" /><button type="button" class="btn-secondary btn-sm" id="dni-interpretar">Usar texto</button></div>
         <div class="dni-estado" id="dni-estado"></div>
-        <input type="file" id="dni-file" accept="image/*" class="hidden" />
+        <input type="file" id="dni-file" accept="image/*" multiple class="hidden" />
       </div>`;
     const fields = personaFields(tabla);
     let ladoPendiente = "frente";
+    const conBcra = tabla === "inquilinos" || tabla === "garantes";
+    let bcraNuevo = null; // resultado de una consulta hecha antes de guardar una ficha nueva
+    const bcraBox = conBcra
+      ? `<div class="bcra-box form-field full" id="bcra-box">
+          <div class="bcra-top"><b>🏦 Situación crediticia — Central de Deudores (BCRA)</b>
+            <div class="bcra-botones"><button type="button" class="btn-primary btn-sm" id="bcra-consultar">Consultar ahora</button>
+            <button type="button" class="btn-link" id="bcra-web" title="Abre la página oficial y copia el CUIL">Abrir página del BCRA</button></div></div>
+          <div id="bcra-resultado">${actual?.bcra_detalle ? htmlBcra(actual.bcra_detalle, actual.bcra_fecha) : '<span class="muted">Sin consultar. Se usa el CUIT/CUIL (si falta, se calcula con el DNI y el sexo).</span>'}</div>
+        </div>`
+      : "";
     openModal({
       title: id ? `Editar ${meta.singular}` : `Nuevo ${meta.singular}`,
       size: "wide",
@@ -862,8 +909,46 @@ function abrirPersona(tabla, id = null, valoresIniciales = {}) {
       before: dniBox,
       fields: fields.map((f) => ({ ...f, full: f.full || f.type === "textarea" })),
       values: { ...(actual || {}), ...valoresIniciales },
+      html: bcraBox ? `<div class="form-grid" style="margin-top:14px">${bcraBox}</div>` : "",
       onMount: () => {
         const estado = $("dni-estado");
+        if (conBcra) {
+          const cuitActual = () => {
+            const c = ($("f-cuit_cuil").value || "").replace(/\D/g, "");
+            if (c.length === 11) return c;
+            return (calcularCuil($("f-dni_cuit").value, $("f-sexo").value) || "").replace(/\D/g, "");
+          };
+          $("bcra-consultar").addEventListener("click", async () => {
+            const cuit = cuitActual();
+            if (cuit.length !== 11) return toast("Cargá el CUIT/CUIL, o el DNI y el sexo para calcularlo", true);
+            if (!$("f-cuit_cuil").value) $("f-cuit_cuil").value = `${cuit.slice(0, 2)}-${cuit.slice(2, 10)}-${cuit.slice(10)}`;
+            $("bcra-resultado").innerHTML = '<span class="muted">Consultando al BCRA…</span>';
+            try {
+              const r = await invoke("consultar_bcra", { cuit, tabla: id ? tabla : null, id });
+              bcraNuevo = r;
+              $("bcra-resultado").innerHTML = htmlBcra(r, hoyIso());
+              if (id) {
+                const p = byId(state[tabla], id);
+                if (p) Object.assign(p, { bcra_situacion: r.situacion, bcra_fecha: hoyIso(), bcra_detalle: r });
+                renderPersonas(tabla);
+              }
+            } catch (e) {
+              $("bcra-resultado").innerHTML = `<span class="dni-estado err">${esc(typeof e === "string" ? e : "No se pudo consultar")}</span>`;
+            }
+          });
+          $("bcra-web").addEventListener("click", async () => {
+            const cuit = cuitActual();
+            if (cuit) {
+              try {
+                await navigator.clipboard.writeText(cuit);
+                toast(`CUIL ${cuit} copiado: pegalo en la página del BCRA`);
+              } catch {
+                /* sin portapapeles */
+              }
+            }
+            await call("abrir_enlace", { url: "https://www.bcra.gob.ar/situacion-crediticia/" });
+          });
+        }
         const pintarSlot = (lado, src) => {
           const slot = modalBody.querySelector(`.dni-slot[data-lado="${lado}"]`);
           slot.innerHTML = src
@@ -873,7 +958,12 @@ function abrirPersona(tabla, id = null, valoresIniciales = {}) {
         const aplicar = (d) => {
           const set = (name, val) => {
             const el = $(`f-${name}`);
-            if (el && val) el.value = val;
+            if (el && val) {
+              el.value = val;
+              el.classList.remove("autocompletado");
+              void el.offsetWidth;
+              el.classList.add("autocompletado");
+            }
           };
           set("nombre", d.nombre_completo);
           set("dni_cuit", d.dni);
@@ -884,26 +974,60 @@ function abrirPersona(tabla, id = null, valoresIniciales = {}) {
           estado.className = "dni-estado ok";
           estado.textContent = `✓ Datos leídos: ${d.nombre_completo} — DNI ${d.dni}${d.cuil ? " — CUIL " + d.cuil : ""}. Revisalos y completá el resto.`;
         };
+        // Una vez que se leyeron datos confiables (código de barras o MRZ
+        // verificada) no se vuelven a pisar con la otra foto.
+        let datosSeguros = false;
         const procesar = async (lado, blob) => {
           estado.className = "dni-estado";
           estado.textContent = "Leyendo la foto…";
           try {
             fotos[lado] = await comprimirFoto(blob);
             pintarSlot(lado, fotos[lado]);
+            if (datosSeguros) {
+              estado.className = "dni-estado ok";
+              estado.textContent = "✓ Foto guardada. Los datos ya se habían leído de la otra cara.";
+              return;
+            }
+            // 1) Código de barras (PDF417): frente en el DNI nuevo, dorso en el 2009-2012
             const texto = await leerCodigoDni(blob);
             const d = interpretarCodigoDni(texto);
-            if (d) aplicar(d);
-            else {
-              estado.className = "dni-estado err";
-              estado.textContent = texto
-                ? "Se leyó un código pero no tiene el formato del DNI. Cargá los datos a mano."
-                : "La foto quedó guardada, pero no se pudo leer el código de barras. Probá con una foto más nítida, de frente y sin reflejos (el código es el rectángulo de rayitas), o cargá los datos a mano.";
+            if (d) {
+              datosSeguros = true;
+              aplicar(d);
+              return;
             }
+            // 2) Las 3 líneas con <<< del dorso (MRZ)
+            estado.textContent = "No se encontró el código de barras. Buscando las líneas con «<<<» del dorso…";
+            const m = await leerMrzDni(blob);
+            if (m) {
+              datosSeguros = m.verificado;
+              aplicar(m);
+              if (!m.verificado) {
+                estado.className = "dni-estado err";
+                estado.textContent = `Datos leídos del dorso: ${m.nombre_completo} — DNI ${m.dni}. ⚠ La foto no es del todo nítida: revisá que el nombre, el DNI y la fecha estén bien.`;
+              } else {
+                estado.textContent += " (leídos de las líneas del dorso)";
+              }
+              return;
+            }
+            estado.className = "dni-estado err";
+            estado.textContent =
+              lado === "frente"
+                ? "Foto guardada. No se pudo leer el código de barras: sumá la foto del dorso (ahí también están los datos) o probá con una foto más nítida, de frente y sin reflejos."
+                : "Foto guardada, pero no se pudieron leer los datos. Probá con una foto más nítida, derecha y sin reflejos, o cargalos a mano.";
           } catch (err) {
             console.error(err);
             estado.className = "dni-estado err";
             estado.textContent = "No se pudo procesar la imagen.";
           }
+        };
+        // Varias fotos a la vez: la primera va al frente y la segunda al dorso.
+        const procesarVarias = async (files, ladoInicial) => {
+          const lista = Array.from(files).filter((f) => f.type.startsWith("image/")).slice(0, 2);
+          if (lista.length === 2) {
+            await procesar("frente", lista[0]);
+            await procesar("dorso", lista[1]);
+          } else if (lista.length === 1) await procesar(ladoInicial, lista[0]);
         };
         const fileInput = $("dni-file");
         modalBody.querySelectorAll(".dni-slot").forEach((slot) => {
@@ -929,12 +1053,11 @@ function abrirPersona(tabla, id = null, valoresIniciales = {}) {
           slot.addEventListener("drop", (ev) => {
             ev.preventDefault();
             slot.classList.remove("drag");
-            const f = ev.dataTransfer.files[0];
-            if (f) procesar(slot.dataset.lado, f);
+            procesarVarias(ev.dataTransfer.files, slot.dataset.lado);
           });
         });
         fileInput.addEventListener("change", () => {
-          if (fileInput.files[0]) procesar(ladoPendiente, fileInput.files[0]);
+          if (fileInput.files.length) procesarVarias(fileInput.files, ladoPendiente);
           fileInput.value = "";
         });
         const onPaste = (ev) => {
@@ -975,6 +1098,7 @@ function abrirPersona(tabla, id = null, valoresIniciales = {}) {
         const datos = { id, ...values };
         if (fotos.frente !== undefined) datos.dni_frente = fotos.frente;
         if (fotos.dorso !== undefined) datos.dni_dorso = fotos.dorso;
+        if (bcraNuevo && !id) Object.assign(datos, { bcra_situacion: bcraNuevo.situacion, bcra_fecha: hoyIso(), bcra_detalle: bcraNuevo });
         const nuevoId = await call(meta.cmd, { [meta.arg]: datos });
         toast(`${meta.singular.charAt(0).toUpperCase() + meta.singular.slice(1)} guardado`);
         await loadAll();
@@ -1050,7 +1174,7 @@ function renderInmuebles() {
       return `<tr><td>${codHtml(i.codigo)}</td><td>${esc(i.direccion)}${i.piso_depto ? " " + esc(i.piso_depto) : ""}<span class="sub-line">${esc(i.localidad || "")}</span></td>
       <td>${esc(i.tipo || "-")}<span class="sub-line">${esc(i.destino || "")}</span></td><td>${det || '<span class="muted">-</span>'}</td>
       <td>${esc(i.propietario_nombre)}</td><td>${estado}</td>
-      <td class="actions"><button class="btn-link" data-action="edit-inmueble" data-id="${i.id}">Editar</button><button class="btn-link peligro" data-action="del-inmueble" data-id="${i.id}">Eliminar</button></td></tr>`;
+      <td class="actions"><button class="btn-link" data-action="fotos-inmueble" data-id="${i.id}">📷 Fotos</button><button class="btn-link" data-action="edit-inmueble" data-id="${i.id}">Editar</button><button class="btn-link peligro" data-action="del-inmueble" data-id="${i.id}">Eliminar</button></td></tr>`;
     })
     .join("");
   aplicarBusqueda("tbl-inmuebles");
@@ -1067,6 +1191,10 @@ function abrirInmueble(id = null) {
       values: actual || {},
       onMount: () => {
         if (!state.propietarios.length) modalInfo.innerHTML = "Primero cargá al menos un propietario.";
+        else if (id) {
+          modalInfo.innerHTML = `<button type="button" class="btn-secondary btn-sm" id="inm-ir-fotos">📷 Fotos del estado de la propiedad</button>`;
+          $("inm-ir-fotos").addEventListener("click", () => abrirFotosInmueble(id));
+        } else modalInfo.textContent = "Después de guardarlo vas a poder cargarle fotos.";
       },
       onSave: async (values) => {
         const nuevoId = await call("guardar_inmueble", { inmueble: { id, ...values } });
@@ -1087,12 +1215,165 @@ $("tbl-inmuebles").addEventListener("click", async (e) => {
   if (!btn) return;
   const id = Number(btn.dataset.id);
   if (btn.dataset.action === "edit-inmueble") abrirInmueble(id);
+  if (btn.dataset.action === "fotos-inmueble") abrirFotosInmueble(id);
   if (btn.dataset.action === "del-inmueble" && confirm("¿Eliminar este inmueble? No se puede si tiene contratos.")) {
     await call("eliminar_inmueble", { id });
     toast("Inmueble eliminado");
     await loadAll();
   }
 });
+
+// ---------- FOTOS DEL INMUEBLE ----------
+
+const TIPOS_FOTO = ["Entrega", "Devolución", "Inspección", "Publicación", "General"];
+
+async function abrirFotosInmueble(inmuebleId) {
+  const inm = byId(state.inmuebles, inmuebleId);
+  if (!inm) return;
+  const contratos = state.contratos.filter((c) => c.inmueble_id === inmuebleId);
+  const activo = contratos.find((c) => c.estado === "activo");
+  let fotos = [];
+  let filtro = "";
+  const html = `
+    <div class="galeria-barra">
+      <label class="inline-field">Las fotos nuevas son de <select id="gf-tipo">${TIPOS_FOTO.map((t) => `<option>${t}</option>`).join("")}</select></label>
+      <label class="inline-field">fecha <input type="date" id="gf-fecha" value="${hoyIso()}" /></label>
+      <label class="inline-field">contrato <select id="gf-contrato"><option value="">—</option>${contratos
+        .map((c) => `<option value="${c.id}" ${c.id === activo?.id ? "selected" : ""}>N° ${esc(c.numero ?? c.id)} · ${esc(c.inquilino_nombre)}</option>`)
+        .join("")}</select></label>
+      <span style="flex:1"></span>
+      <label class="inline-field">Ver <select id="gf-filtro"><option value="">Todas</option>${TIPOS_FOTO.map((t) => `<option>${t}</option>`).join("")}</select></label>
+      <button type="button" class="btn-secondary btn-sm" id="gf-acta">🖨 Imprimir acta</button>
+    </div>
+    <p class="hint" id="gf-estado">Arrastrá fotos acá, hacé clic en el recuadro o pegá con Ctrl+V. Podés elegir varias a la vez.</p>
+    <div class="galeria" id="gf-galeria"></div>
+    <input type="file" id="gf-file" accept="image/*" multiple class="hidden" />`;
+
+  const pintar = () => {
+    const lista = fotos.filter((f) => !filtro || f.tipo === filtro);
+    $("gf-galeria").innerHTML =
+      `<div class="galeria-subir" id="gf-subir"><span style="font-size:26px">＋</span><b>Agregar fotos</b><small>como se entrega la propiedad</small></div>` +
+      lista
+        .map(
+          (f) => `<div class="galeria-item"><img src="${f.miniatura || ""}" data-ver="${f.id}" alt="" />
+          <div class="gi-pie"><input type="text" value="${esc(f.descripcion || "")}" data-desc="${f.id}" placeholder="Descripción (ej. cocina, pared con humedad)" />
+          <div class="gi-meta"><span class="pill pill-gold">${esc(f.tipo)}</span><span>${fmtDate(f.fecha)}</span><button type="button" class="btn-icon" data-borrar="${f.id}" title="Eliminar">✕</button></div></div></div>`
+        )
+        .join("");
+    modalInfo.textContent = `${fotos.length} foto${fotos.length === 1 ? "" : "s"} cargada${fotos.length === 1 ? "" : "s"}`;
+  };
+
+  const cargar = async () => {
+    fotos = await call("get_fotos_inmueble", { inmuebleId });
+    pintar();
+  };
+
+  const subir = async (files) => {
+    const lista = Array.from(files).filter((f) => f.type.startsWith("image/"));
+    if (!lista.length) return;
+    const est = $("gf-estado");
+    let n = 0;
+    for (const f of lista) {
+      n++;
+      est.textContent = `Subiendo foto ${n} de ${lista.length}…`;
+      try {
+        const [foto, miniatura] = await Promise.all([comprimirFoto(f, 1600), comprimirFoto(f, 360)]);
+        await call("guardar_foto_inmueble", {
+          foto: {
+            inmueble_id: inmuebleId,
+            contrato_id: $("gf-contrato").value ? Number($("gf-contrato").value) : null,
+            tipo: $("gf-tipo").value,
+            fecha: $("gf-fecha").value || hoyIso(),
+            descripcion: "",
+            foto,
+            miniatura,
+            usuario: usuarioNombre(),
+          },
+        });
+      } catch (e) {
+        console.error(e);
+      }
+    }
+    est.textContent = `✓ ${lista.length} foto${lista.length === 1 ? "" : "s"} guardada${lista.length === 1 ? "" : "s"}. Escribí debajo de cada una qué muestra.`;
+    await cargar();
+  };
+
+  openModal({
+    title: `Fotos — ${inm.codigo != null ? inm.codigo + " - " : ""}${inm.direccion}`,
+    size: "xl",
+    html,
+    sinGuardar: true,
+    onMount: () => {
+      $("modal-cancel").textContent = "Cerrar";
+      const fileInput = $("gf-file");
+      const galeria = $("gf-galeria");
+      galeria.addEventListener("click", async (e) => {
+        if (e.target.closest("#gf-subir")) return fileInput.click();
+        const ver = e.target.closest("[data-ver]");
+        if (ver) {
+          const f = await call("get_foto_inmueble", { id: Number(ver.dataset.ver) });
+          openPrint(`<div style="padding:10px;max-width:1000px"><img src="${f.foto}" style="max-width:100%;display:block"><p>${esc(f.descripcion || "")} · ${esc(f.tipo)} · ${fmtDate(f.fecha)}</p></div>`, { titulo: "Foto" });
+          return;
+        }
+        const b = e.target.closest("[data-borrar]");
+        if (b && confirm("¿Eliminar esta foto?")) {
+          await call("eliminar_foto_inmueble", { id: Number(b.dataset.borrar) });
+          await cargar();
+        }
+      });
+      galeria.addEventListener("change", async (e) => {
+        const inp = e.target.closest("[data-desc]");
+        if (!inp) return;
+        await call("guardar_foto_inmueble", { foto: { id: Number(inp.dataset.desc), descripcion: inp.value.trim() } });
+        const f = fotos.find((x) => x.id === Number(inp.dataset.desc));
+        if (f) f.descripcion = inp.value.trim();
+        toast("Descripción guardada");
+      });
+      galeria.addEventListener("dragover", (e) => {
+        e.preventDefault();
+        $("gf-subir")?.classList.add("drag");
+      });
+      galeria.addEventListener("dragleave", () => $("gf-subir")?.classList.remove("drag"));
+      galeria.addEventListener("drop", (e) => {
+        e.preventDefault();
+        $("gf-subir")?.classList.remove("drag");
+        subir(e.dataTransfer.files);
+      });
+      fileInput.addEventListener("change", () => {
+        subir(fileInput.files);
+        fileInput.value = "";
+      });
+      const onPaste = (ev) => {
+        const files = Array.from(ev.clipboardData?.items || []).filter((i) => i.type.startsWith("image/")).map((i) => i.getAsFile());
+        if (files.length) {
+          ev.preventDefault();
+          subir(files);
+        }
+      };
+      document.addEventListener("paste", onPaste);
+      modalCleanup = () => {
+        document.removeEventListener("paste", onPaste);
+        $("modal-cancel").textContent = "Cancelar";
+      };
+      $("gf-filtro").addEventListener("change", (e) => {
+        filtro = e.target.value;
+        pintar();
+      });
+      $("gf-acta").addEventListener("click", async () => {
+        const tipo = filtro || $("gf-tipo").value;
+        const completas = await call("get_fotos_inmueble_completas", { inmuebleId, tipo });
+        if (!completas.length) return toast(`No hay fotos de tipo "${tipo}" para el acta`, true);
+        const cId = completas.find((f) => f.contrato_id)?.contrato_id;
+        const contrato = (cId && byId(state.contratos, cId)) || activo;
+        openPrint(htmlActaFotos({ inmueble: inm, contrato, fotos: completas, tipo, fecha: completas[completas.length - 1].fecha }, configCompleta()), {
+          titulo: `Acta de estado — ${tipo}`,
+        });
+      });
+      cargar();
+    },
+    onSave: async () => {},
+  });
+}
 
 // ---------- CONTRATOS ----------
 
@@ -2135,7 +2416,8 @@ async function verificarBase() {
     return true;
   }
   try {
-    $("migracion-sql").value = await (await fetch("migracion-0.3.0.sql")).text();
+    const partes = await Promise.all(["migracion-0.3.0.sql", "migracion-0.4.0.sql"].map(async (f) => (await fetch(f)).text()));
+    $("migracion-sql").value = partes.join("\n\n");
   } catch {
     $("migracion-sql").value = "No se pudo leer el archivo de migración.";
   }
@@ -2168,6 +2450,63 @@ async function entrarAlApp(usuario) {
   if (!(await verificarBase())) return;
   $("app").classList.remove("hidden");
   await loadAll();
+  mostrarAlertaInicio();
+}
+
+// ---------- Alerta al iniciar: qué vence o se actualiza el próximo mes ----------
+
+function finDeMes(periodo) {
+  const [y, m] = periodo.split("-").map(Number);
+  return `${periodo}-${String(new Date(y, m, 0).getDate()).padStart(2, "0")}`;
+}
+
+function mostrarAlertaInicio() {
+  const hoy = hoyIso();
+  const clave = `alerta-inicio-${hoy}`;
+  try {
+    if (localStorage.getItem(clave)) return;
+  } catch {
+    /* sin almacenamiento local: se muestra igual */
+  }
+  const mesSig = sumarMeses(hoy.slice(0, 7), 1);
+  const hasta = finDeMes(mesSig);
+  const activos = contratosActivos();
+  const vencen = activos.filter((c) => c.fecha_fin <= hasta).sort((a, b) => a.fecha_fin.localeCompare(b.fecha_fin));
+  const actualizan = activos
+    .filter((c) => c.proxima_actualizacion && c.proxima_actualizacion <= hasta && c.proxima_actualizacion <= c.fecha_fin)
+    .sort((a, b) => a.proxima_actualizacion.localeCompare(b.proxima_actualizacion));
+  if (!vencen.length && !actualizan.length) return;
+  const fila = (c, fecha, extra) => {
+    const dd = diasEntre(hoy, fecha);
+    const pill = dd < 0 ? "pill-danger" : dd <= 15 ? "pill-warning" : "pill-gris";
+    return `<tr><td>${codHtml(c.inmueble_codigo)}${esc(c.inmueble_direccion)}<span class="sub-line">${esc(c.inquilino_nombre)}</span></td>
+      <td>${fmtDate(fecha)} <span class="pill ${pill}">${dd < 0 ? "atrasado " + -dd + " días" : diasTexto(dd)}</span></td><td>${extra}</td></tr>`;
+  };
+  const tabla = (titulo, filas, vacioTxt) => `<div class="form-section" style="margin:6px 0 8px">${titulo}</div>
+    <div class="table-wrap" style="margin-bottom:14px"><table class="data-table compact"><tbody>${filas || vacio(3, vacioTxt)}</tbody></table></div>`;
+  openModal({
+    title: `Atención: ${periodoTitulo(hoy.slice(0, 7))} y ${periodoTitulo(mesSig)}`,
+    size: "wide",
+    saveLabel: "Ver aumentos",
+    html: `<p class="hint">Contratos que vencen o se actualizan desde hoy hasta el ${fmtDate(hasta)} (incluye los atrasados).</p>
+      ${tabla(`📄 Contratos que vencen (${vencen.length})`, vencen.map((c) => fila(c, c.fecha_fin, `Prop.: ${esc(c.propietario_nombre)}`)).join(""), "Ninguno")}
+      ${tabla(`📈 Aumentos de alquiler (${actualizan.length})`, actualizan.map((c) => fila(c, c.proxima_actualizacion, `${esc(nombreIndice(c.tipo_actualizacion))} · hoy ${money(c.monto_vigente)}`)).join(""), "Ninguno")}
+      <label class="login-recordar"><input type="checkbox" id="alerta-no-hoy" checked /> No volver a mostrar hoy en esta PC</label>`,
+    onMount: () => {
+      $("modal-cancel").textContent = "Cerrar";
+      modalCleanup = () => {
+        $("modal-cancel").textContent = "Cancelar";
+        try {
+          if ($("alerta-no-hoy")?.checked) localStorage.setItem(clave, "1");
+        } catch {
+          /* nada */
+        }
+      };
+    },
+    onSave: async () => {
+      switchView(actualizan.length ? "aumentos" : "contratos");
+    },
+  });
 }
 
 loginForm.addEventListener("submit", async (e) => {

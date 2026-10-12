@@ -1,4 +1,5 @@
 mod commands;
+mod bcra;
 mod config;
 mod icl;
 mod ipc;
@@ -69,6 +70,12 @@ pub fn manejador<R: tauri::Runtime>() -> impl Fn(tauri::ipc::Invoke<R>) -> bool 
         commands::estimar_actualizacion_icl,
         commands::confirmar_actualizacion_icl,
         commands::base_actualizada,
+        commands::consultar_bcra,
+        commands::get_fotos_inmueble,
+        commands::get_foto_inmueble,
+        commands::get_fotos_inmueble_completas,
+        commands::guardar_foto_inmueble,
+        commands::eliminar_foto_inmueble,
         commands::get_configuracion,
         commands::guardar_configuracion,
         commands::get_ipc,
