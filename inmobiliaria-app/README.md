@@ -47,6 +47,12 @@ PCs que se conecten al mismo proyecto ven y cargan los mismos datos.
   atrasados, aumentos, fin de contrato y cumpleaños. Cada botón abre
   WhatsApp con el mensaje listo y queda registrado quién avisó y cuándo.
   Los mensajes se editan en Configuración.
+- **Generar contrato** (botón dorado arriba en el menú): modelos editables
+  (vivienda, comercial, fianza, acta de entrega de llaves, o propios pegados
+  desde Word) con marcadores `{{inquilino.nombre}}`, `{{contrato.monto_letras}}`,
+  etc. que se completan con los datos del contrato. Vista previa editable,
+  impresión/PDF y "Abrir en Word" (se guarda en Documentos\Contratos Carranza).
+  Los documentos generados quedan guardados para reimprimir.
 - **Alerta al iniciar**: contratos que vencen y aumentos que tocan desde hoy
   hasta fin del mes que viene.
 - **DNI**: si el código de barras no se lee, se leen las 3 líneas con «<<<»
@@ -62,7 +68,8 @@ PCs que se conecten al mismo proyecto ven y cargan los mismos datos.
 
 ## Actualizar la base (una sola vez por versión)
 
-La v0.4.0 agrega la tabla de fotos y la consulta al BCRA
+La v0.5.0 agrega los modelos y documentos generados
+([`src/migracion-0.5.0.sql`](./src/migracion-0.5.0.sql)). La v0.4.0 agrega la tabla de fotos y la consulta al BCRA
 ([`src/migracion-0.4.0.sql`](./src/migracion-0.4.0.sql)); la app muestra
 las migraciones pendientes juntas con un botón **Copiar**.
 

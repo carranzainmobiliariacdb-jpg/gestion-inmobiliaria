@@ -20,6 +20,7 @@
         <span class="brand-text"><span class="brand-name">Carranza</span><span class="brand-sub">Gestión de alquileres</span></span>
       </div>
       <nav id="nav">
+        <button class="nav-btn nav-destacado" data-view="documentos"><svg class="icon" viewBox="0 0 24 24"><path d="M14 2H6a2 2 0 0 0-2 2v16a2 2 0 0 0 2 2h12a2 2 0 0 0 2-2V8z"/><polyline points="14 2 14 8 20 8"/><path d="m9 15 2 2 4-4"/></svg> Generar contrato</button>
         <div class="nav-grupo">General</div>
         <button class="nav-btn active" data-view="dashboard"><svg class="icon" viewBox="0 0 24 24"><rect x="3" y="3" width="7" height="9" rx="1.5"/><rect x="14" y="3" width="7" height="5" rx="1.5"/><rect x="14" y="12" width="7" height="9" rx="1.5"/><rect x="3" y="16" width="7" height="5" rx="1.5"/></svg> Tablero</button>
         <button class="nav-btn" data-view="avisos"><svg class="icon" viewBox="0 0 24 24"><path d="M21 11.5a8.4 8.4 0 0 1-12.4 7.4L3 21l2.1-5.4A8.4 8.4 0 1 1 21 11.5z"/></svg> Avisos WhatsApp <span class="nav-badge hidden" id="badge-avisos"></span></button>
@@ -173,6 +174,32 @@
         </header>
         <div class="toolbar"><input class="search" data-search="tbl-garantes" placeholder="Buscar…" /></div>
         <div class="table-wrap"><table class="data-table"><thead><tr><th>Nombre</th><th>DNI / CUIL</th><th>Teléfono</th><th>Garantía</th><th>Garantiza a</th><th></th></tr></thead><tbody id="tbl-garantes"></tbody></table></div>
+      </section>
+
+      <!-- CONTRATOS DESDE MODELO -->
+      <section id="view-documentos" class="view">
+        <header class="view-header">
+          <div><h1>Generar contrato</h1><p class="sub">Elegí un contrato y un modelo: el documento se completa solo con los datos del propietario, inquilino, garantes e inmueble. Lo podés corregir antes de imprimirlo o abrirlo en Word.</p></div>
+          <div class="header-actions"><button class="btn-secondary" id="btn-nuevo-modelo">+ Nuevo modelo</button></div>
+        </header>
+        <div class="panel generar-panel">
+          <div class="panel-header"><h2>1. ¿Qué querés generar?</h2></div>
+          <div class="generar-form">
+            <div class="form-field"><label>Contrato</label><select id="gen-contrato"></select></div>
+            <div class="form-field"><label>Modelo</label><select id="gen-modelo"></select></div>
+            <button class="btn-gold" id="gen-generar">📝 Generar documento</button>
+          </div>
+        </div>
+        <div class="dash-grid" style="margin-top:18px">
+          <div class="panel">
+            <div class="panel-header"><h2>Modelos</h2><span class="panel-sub">editables, se comparten entre las PCs</span></div>
+            <div class="table-wrap"><table class="data-table compact"><tbody id="tbl-modelos"></tbody></table></div>
+          </div>
+          <div class="panel">
+            <div class="panel-header"><h2>Documentos generados</h2><span class="panel-sub">quedan guardados para reimprimir</span></div>
+            <div class="table-wrap"><table class="data-table compact"><tbody id="tbl-documentos"></tbody></table></div>
+          </div>
+        </div>
       </section>
 
       <!-- CONFIGURACIÓN -->

@@ -61,6 +61,9 @@ fn main() {
             let res = if cmd == "abrir_enlace" {
                 eprintln!("[WHATSAPP] {}", argumentos["url"]);
                 Ok(serde_json::Value::Null)
+            } else if cmd == "abrir_en_word" {
+                let _ = std::fs::write("/tmp/ultimo-documento.doc", argumentos["html"].as_str().unwrap_or(""));
+                Ok(serde_json::json!("C:\\Users\\agustin\\Documents\\Contratos Carranza\\prueba.doc"))
             } else if cmd == "consultar_bcra" && std::env::var("BCRA_FALSO").is_ok() {
                 // Respuesta simulada (el entorno de pruebas no llega a api.bcra.gob.ar)
                 Ok(serde_json::json!({

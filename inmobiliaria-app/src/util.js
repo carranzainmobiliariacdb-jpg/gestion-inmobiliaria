@@ -108,6 +108,32 @@ function enteroEnLetras(n) {
   return partes.join(" ");
 }
 
+/** 24 → "veinticuatro" (entero en letras, en minúscula). */
+export function numeroEnLetras(n) {
+  let t = enteroEnLetras(Math.floor(Math.abs(Number(n) || 0)));
+  if (/\bUN$/.test(t)) t = t.replace(/UN$/, "UNO");
+  if (/\bVEINTIUN$/.test(t)) t = t.replace(/VEINTIUN$/, "VEINTIUNO");
+  const acentos = { dieciseis: "dieciséis", veintidos: "veintidós", veintitres: "veintitrés", veintiseis: "veintiséis", veintiun: "veintiún", millon: "millón" };
+  return t.toLowerCase().replace(/\b(dieciseis|veintidos|veintitres|veintiseis|veintiun|millon)\b/g, (w) => acentos[w]);
+}
+
+const MESES_MIN = ["enero", "febrero", "marzo", "abril", "mayo", "junio", "julio", "agosto", "septiembre", "octubre", "noviembre", "diciembre"];
+
+/** "2026-07-01" → "1 de julio de 2026" */
+export function fechaLetras(iso) {
+  if (!iso) return "";
+  const [y, m, d] = iso.slice(0, 10).split("-").map(Number);
+  return `${d} de ${MESES_MIN[m - 1]} de ${y}`;
+}
+
+/** "2026-10-12" → "a los doce días del mes de octubre del año dos mil veintiséis" */
+export function fechaLarga(iso) {
+  if (!iso) return "";
+  const [y, m, d] = iso.slice(0, 10).split("-").map(Number);
+  const dia = d === 1 ? "al primer día" : `a los ${numeroEnLetras(d)} días`;
+  return `${dia} del mes de ${MESES_MIN[m - 1]} del año ${numeroEnLetras(y)}`;
+}
+
 /** 350000 → "TRESCIENTOS CINCUENTA MIL CON 00/100 CTS." */
 export function montoEnLetras(monto) {
   const total = Math.round(Math.abs(Number(monto) || 0) * 100);

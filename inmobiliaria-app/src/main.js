@@ -4,6 +4,7 @@ import {
 } from "./util.js";
 import { leerCodigoDni, interpretarCodigoDni, leerMrzDni, comprimirFoto, calcularCuil } from "./dni.js";
 import { htmlRecibo, htmlLiquidacion, htmlActaFotos, totalesRecibo, totalesLiquidacion } from "./documentos.js";
+import { VARIABLES as VARIABLES_MODELO, MODELOS_BASE, valoresContrato, completarModelo, htmlParaWord } from "./modelos.js";
 
 const invoke = window.__TAURI__.core.invoke;
 
@@ -41,6 +42,7 @@ const CONFIG_DEFECTO = {
   recibo_leyenda: "",
   recibo_logo: "",
   aumento_redondeo: "1",
+  contrato_jurisdiccion: "los Tribunales Ordinarios de la ciudad de Corral de Bustos - Ifflinger, Provincia de Córdoba",
   wa_codigo_area: "3468",
   wa_datos_pago: "",
   aviso_dias_antes: "5",
@@ -136,6 +138,7 @@ function switchView(view) {
     renderAvisos();
   }
   if (view === "configuracion") renderConfig();
+  if (view === "documentos") renderDocumentos();
 }
 
 // Buscadores de las tablas
@@ -1441,6 +1444,7 @@ function renderContratos() {
       <td>${esc(nombreIndice(c.tipo_actualizacion))} c/${c.frecuencia_actualizacion_meses}m${c.estado === "activo" && c.proxima_actualizacion && c.proxima_actualizacion <= c.fecha_fin ? `<span class="sub-line">próx. ${fmtDate(c.proxima_actualizacion)}${dAct != null && dAct <= 15 ? " ⚠" : ""}</span>` : ""}</td>
       <td>${pill}</td>
       <td class="actions">
+        <button class="btn-link" data-action="generar-doc" data-id="${c.id}">📝 Documento</button>
         <button class="btn-link" data-action="ver-actualizaciones" data-id="${c.id}">Aumentos</button>
         <button class="btn-link" data-action="edit-contrato" data-id="${c.id}">Editar</button>
         <button class="btn-link peligro" data-action="del-contrato" data-id="${c.id}">Eliminar</button>
@@ -1524,6 +1528,10 @@ $("tbl-contratos").addEventListener("click", async (e) => {
     await loadAll();
   }
   if (btn.dataset.action === "ver-actualizaciones") abrirActualizaciones(id);
+  if (btn.dataset.action === "generar-doc") {
+    contratoParaDocumento = id;
+    switchView("documentos");
+  }
 });
 
 async function abrirActualizaciones(contratoId, sugerido = null) {
@@ -2142,6 +2150,231 @@ async function verLiquidacion(numeroLiq) {
   });
 }
 
+// ---------- CONTRATOS DESDE MODELO ----------
+
+let contratoParaDocumento = null;
+
+async function cargarModelos() {
+  let modelos = await call("get_modelos");
+  if (!modelos.length) {
+    // Primera vez: se cargan los modelos base para tener de dónde partir.
+    for (const m of MODELOS_BASE) await call("guardar_modelo", { modelo: m });
+    modelos = await call("get_modelos");
+  }
+  state.modelos = modelos;
+  return modelos;
+}
+
+async function renderDocumentos() {
+  const [modelos, documentos] = await Promise.all([cargarModelos(), call("get_documentos")]);
+  state.documentos = documentos;
+  const contratos = [...state.contratos].sort((a, b) => (a.estado === "activo" ? 0 : 1) - (b.estado === "activo" ? 0 : 1) || (b.numero || 0) - (a.numero || 0));
+  const selC = $("gen-contrato");
+  const previo = contratoParaDocumento ?? Number(selC.value || 0);
+  selC.innerHTML = contratos.length
+    ? contratos.map((c) => `<option value="${c.id}" ${c.id === previo ? "selected" : ""}>N° ${esc(c.numero ?? c.id)} · ${esc(etiquetaInmueble(c))} — ${esc(c.inquilino_nombre)}${c.estado !== "activo" ? ` (${esc(c.estado)})` : ""}</option>`).join("")
+    : `<option value="">Primero cargá un contrato</option>`;
+  contratoParaDocumento = null;
+  const selM = $("gen-modelo");
+  const previoM = Number(selM.value || 0);
+  selM.innerHTML = modelos.map((m) => `<option value="${m.id}" ${m.id === previoM ? "selected" : ""}>${esc(m.nombre)}</option>`).join("");
+
+  $("tbl-modelos").innerHTML = modelos
+    .map(
+      (m) => `<tr><td><b>${esc(m.nombre)}</b><span class="sub-line">${esc(m.tipo || "")}${m.actualizado ? ` · editado ${fmtDate(m.actualizado)}` : ""}</span></td>
+      <td class="actions"><button class="btn-link" data-modelo-editar="${m.id}">Editar</button><button class="btn-link" data-modelo-duplicar="${m.id}">Duplicar</button><button class="btn-link peligro" data-modelo-borrar="${m.id}">Eliminar</button></td></tr>`
+    )
+    .join("") || vacio(2, "Sin modelos");
+  $("tbl-documentos").innerHTML = documentos.length
+    ? documentos
+        .map((d) => {
+          const c = byId(state.contratos, d.contrato_id);
+          return `<tr><td><b>${esc(d.titulo)}</b><span class="sub-line">${fmtDate(d.fecha)}${c ? ` · ${esc(etiquetaInmueble(c))}` : ""}${d.usuario ? ` · ${esc(d.usuario)}` : ""}</span></td>
+          <td class="actions"><button class="btn-link" data-doc-abrir="${d.id}">Abrir</button><button class="btn-link peligro" data-doc-borrar="${d.id}">Eliminar</button></td></tr>`;
+        })
+        .join("")
+    : vacio(2, "Todavía no generaste documentos");
+}
+
+$("gen-generar").addEventListener("click", () => {
+  const cId = Number($("gen-contrato").value);
+  const mId = Number($("gen-modelo").value);
+  if (!cId) return toast("Primero cargá un contrato en la sección Contratos", true);
+  const modelo = state.modelos.find((m) => m.id === mId);
+  if (!modelo) return toast("Elegí un modelo", true);
+  generarDocumento(cId, modelo);
+});
+
+$("btn-nuevo-modelo").addEventListener("click", () => editarModelo(null));
+
+document.getElementById("view-documentos").addEventListener("click", async (e) => {
+  const b = e.target.closest("button");
+  if (!b) return;
+  if (b.dataset.modeloEditar) editarModelo(state.modelos.find((m) => m.id === Number(b.dataset.modeloEditar)));
+  if (b.dataset.modeloDuplicar) {
+    const m = state.modelos.find((x) => x.id === Number(b.dataset.modeloDuplicar));
+    await call("guardar_modelo", { modelo: { nombre: `${m.nombre} (copia)`, tipo: m.tipo, contenido: m.contenido } });
+    toast("Modelo duplicado");
+    renderDocumentos();
+  }
+  if (b.dataset.modeloBorrar && confirm("¿Eliminar este modelo? Los documentos ya generados no se borran.")) {
+    await call("eliminar_modelo", { id: Number(b.dataset.modeloBorrar) });
+    renderDocumentos();
+  }
+  if (b.dataset.docAbrir) {
+    const d = await call("get_documento", { id: Number(b.dataset.docAbrir) });
+    abrirEditorDocumento({ titulo: d.titulo, html: d.contenido, faltan: [], docId: d.id, contratoId: d.contrato_id, modeloId: d.modelo_id });
+  }
+  if (b.dataset.docBorrar && confirm("¿Eliminar este documento generado?")) {
+    await call("eliminar_documento", { id: Number(b.dataset.docBorrar) });
+    renderDocumentos();
+  }
+});
+
+/** Barra de formato + panel de datos, compartida por el editor de modelos y de documentos. */
+function barraEditor(conVariables) {
+  return `<div class="editor-barra">
+    <button type="button" data-cmd="bold"><b>N</b></button><button type="button" data-cmd="italic"><i>C</i></button><button type="button" data-cmd="underline"><u>S</u></button>
+    <button type="button" data-cmd="formatBlock" data-val="H1">Título</button><button type="button" data-cmd="formatBlock" data-val="P">Párrafo</button>
+    <button type="button" data-cmd="justifyLeft">⟸ Izq.</button><button type="button" data-cmd="justifyCenter">≡ Centro</button><button type="button" data-cmd="justifyFull">☰ Justif.</button>
+    <button type="button" data-cmd="undo">↶ Deshacer</button><button type="button" data-cmd="redo">↷ Rehacer</button>
+    ${conVariables ? '<button type="button" id="btn-variables" style="margin-left:auto;background:var(--gold-light);border-color:var(--gold)">＋ Insertar dato</button>' : ""}
+  </div>`;
+}
+
+function activarBarra(hojaId) {
+  modalBody.querySelectorAll(".editor-barra [data-cmd]").forEach((b) =>
+    b.addEventListener("mousedown", (e) => {
+      e.preventDefault();
+      $(hojaId).focus();
+      document.execCommand(b.dataset.cmd, false, b.dataset.val || null);
+    })
+  );
+}
+
+function editarModelo(modelo) {
+  const html = `
+    <div class="form-grid" style="margin-bottom:12px">
+      <div class="form-field"><label>Nombre del modelo</label><input type="text" id="mod-nombre" value="${esc(modelo?.nombre || "")}" placeholder="Ej: Contrato vivienda 36 meses" /></div>
+      <div class="form-field"><label>Tipo</label><input type="text" id="mod-tipo" value="${esc(modelo?.tipo || "")}" placeholder="Vivienda, Comercial, Garantía, Acta…" /></div>
+    </div>
+    <p class="hint">Escribí o pegá el texto de tu modelo (podés copiarlo desde Word). Donde va un dato, poné el cursor y tocá <b>＋ Insertar dato</b>: queda un marcador como <code>{{inquilino.nombre}}</code> que se reemplaza solo al generar.</p>
+    <div class="variables-panel hidden" id="variables-panel">${VARIABLES_MODELO.map(
+      ([grupo, vars]) => `<div class="vgrupo"><b>${esc(grupo)}</b>${vars.map(([k, label]) => `<button type="button" class="chip" data-var="${k}" title="{{${k}}}">${esc(label)}</button>`).join("")}</div>`
+    ).join("")}</div>
+    ${barraEditor(true)}
+    <div class="editor-hoja"><div class="hoja" id="mod-hoja" contenteditable="true">${modelo?.contenido || "<p>Escribí acá el texto del modelo…</p>"}</div></div>`;
+  let rango = null;
+  openModal({
+    title: modelo ? `Editar modelo — ${modelo.nombre}` : "Nuevo modelo",
+    size: "xl",
+    html,
+    saveLabel: "Guardar modelo",
+    onMount: () => {
+      activarBarra("mod-hoja");
+      const hoja = $("mod-hoja");
+      const guardarRango = () => {
+        const sel = window.getSelection();
+        if (sel.rangeCount && hoja.contains(sel.anchorNode)) rango = sel.getRangeAt(0).cloneRange();
+      };
+      hoja.addEventListener("keyup", guardarRango);
+      hoja.addEventListener("mouseup", guardarRango);
+      $("btn-variables").addEventListener("mousedown", (e) => {
+        e.preventDefault();
+        guardarRango();
+        $("variables-panel").classList.toggle("hidden");
+      });
+      $("variables-panel").addEventListener("mousedown", (e) => {
+        const chip = e.target.closest("[data-var]");
+        if (!chip) return;
+        e.preventDefault();
+        hoja.focus();
+        const sel = window.getSelection();
+        if (rango) {
+          sel.removeAllRanges();
+          sel.addRange(rango);
+        }
+        document.execCommand("insertText", false, `{{${chip.dataset.var}}}`);
+        guardarRango();
+      });
+    },
+    onSave: async () => {
+      const nombre = $("mod-nombre").value.trim();
+      if (!nombre) throw new Error("Poné un nombre al modelo");
+      await call("guardar_modelo", { modelo: { id: modelo?.id ?? null, nombre, tipo: $("mod-tipo").value.trim() || null, contenido: $("mod-hoja").innerHTML } });
+      toast("Modelo guardado");
+      renderDocumentos();
+    },
+  });
+}
+
+function datosParaDocumento(contratoId) {
+  const c = byId(state.contratos, contratoId);
+  return {
+    contrato: c,
+    propietario: byId(state.propietarios, c.propietario_id),
+    inquilino: byId(state.inquilinos, c.inquilino_id),
+    garantes: (c.garante_ids || []).map((id) => byId(state.garantes, id)).filter(Boolean),
+    inmueble: byId(state.inmuebles, c.inmueble_id) || {},
+    cfg: configCompleta(),
+  };
+}
+
+function generarDocumento(contratoId, modelo) {
+  const datos = datosParaDocumento(contratoId);
+  const { html, faltan } = completarModelo(modelo.contenido, valoresContrato(datos));
+  const c = datos.contrato;
+  const titulo = `${modelo.nombre} — N° ${c.numero ?? c.id} — ${c.inquilino_nombre}`;
+  abrirEditorDocumento({ titulo, html, faltan, contratoId, modeloId: modelo.id });
+}
+
+const NOMBRES_FALTAN = Object.fromEntries(VARIABLES_MODELO.flatMap(([g, vs]) => vs.map(([k, l]) => [k, `${g.split(" (")[0]}: ${l}`])));
+
+function abrirEditorDocumento({ titulo, html, faltan, docId = null, contratoId, modeloId }) {
+  let id = docId;
+  const guardar = async () => {
+    const contenido = $("doc-hoja").innerHTML;
+    id = await call("guardar_documento", {
+      documento: { id, contrato_id: contratoId ?? null, modelo_id: modeloId ?? null, titulo: $("doc-titulo").value.trim() || titulo, contenido, fecha: hoyIso(), usuario: usuarioNombre() },
+    });
+    return contenido;
+  };
+  const aviso = faltan.length
+    ? `<div class="faltan-aviso">⚠ Faltan ${faltan.length} dato${faltan.length > 1 ? "s" : ""} (marcados en amarillo en el texto): ${faltan.map((f) => esc(NOMBRES_FALTAN[f] || f)).join(", ")}.
+       Podés escribirlos acá mismo, o cargarlos en la ficha correspondiente y volver a generar.</div>`
+    : "";
+  openModal({
+    title: "Documento generado",
+    size: "xl",
+    html: `<div class="form-field" style="margin-bottom:10px"><label>Nombre del documento</label><input type="text" id="doc-titulo" value="${esc(titulo)}" /></div>
+      ${aviso}${barraEditor(false)}
+      <div class="editor-hoja"><div class="hoja" id="doc-hoja" contenteditable="true">${html}</div></div>`,
+    saveLabel: "Guardar",
+    onMount: () => {
+      activarBarra("doc-hoja");
+      modalInfo.innerHTML = `<button type="button" class="btn-secondary btn-sm" id="doc-pdf">🖨 Imprimir / PDF</button> <button type="button" class="btn-secondary btn-sm" id="doc-word">📄 Abrir en Word</button>`;
+      $("doc-pdf").addEventListener("click", async () => {
+        const contenido = await guardar();
+        openPrint(`<div class="doc-contrato">${contenido}</div>`, { titulo: $("doc-titulo").value });
+      });
+      $("doc-word").addEventListener("click", async () => {
+        const contenido = await guardar();
+        try {
+          const ruta = await invoke("abrir_en_word", { nombre: $("doc-titulo").value, html: htmlParaWord($("doc-titulo").value, contenido) });
+          toast(`Guardado en ${ruta}`);
+        } catch (e) {
+          toast(typeof e === "string" ? e : "No se pudo abrir en Word", true);
+        }
+      });
+    },
+    onSave: async () => {
+      await guardar();
+      toast("Documento guardado");
+      if (document.querySelector("#view-documentos.active")) renderDocumentos();
+    },
+  });
+}
+
 // ---------- CONFIGURACIÓN ----------
 
 let cfgTab = "inmobiliaria";
@@ -2200,6 +2433,7 @@ async function renderConfig() {
         ${campoCfg("recibo_numero_desde", "Seguir numeración desde el N°", { type: "number", hint: "Si venías usando otro sistema, poné el próximo número (ej. 1316). Si los recibos de la app ya pasaron ese número, se sigue el de la app." })}
         ${campoCfg("aumento_redondeo", "Redondear aumentos a múltiplos de $", { type: "number", hint: "1 = pesos exactos, 100 = redondea a cientos" })}
         ${campoCfg("recibo_leyenda", "Leyenda al pie del recibo (opcional)", { full: true, placeholder: "Ej: El pago fuera de término devenga intereses según contrato." })}
+        ${campoCfg("contrato_jurisdiccion", "Jurisdicción para los contratos", { full: true, hint: "Se usa en {{inmobiliaria.jurisdiccion}} de los modelos" })}
         <div class="form-field full"><label>Logo del recibo</label>
           <div style="display:flex;gap:10px;align-items:center"><img class="logo-preview" id="cfg-logo-prev" src="${esc(logo || "logo-recibo.jpg")}" />
           <button type="button" class="btn-secondary btn-sm" id="cfg-logo-cambiar">Cambiar…</button>
@@ -2416,7 +2650,7 @@ async function verificarBase() {
     return true;
   }
   try {
-    const partes = await Promise.all(["migracion-0.3.0.sql", "migracion-0.4.0.sql"].map(async (f) => (await fetch(f)).text()));
+    const partes = await Promise.all(["migracion-0.3.0.sql", "migracion-0.4.0.sql", "migracion-0.5.0.sql"].map(async (f) => (await fetch(f)).text()));
     $("migracion-sql").value = partes.join("\n\n");
   } catch {
     $("migracion-sql").value = "No se pudo leer el archivo de migración.";

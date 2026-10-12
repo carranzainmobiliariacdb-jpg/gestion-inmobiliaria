@@ -1005,6 +1005,117 @@ pub async fn eliminar_foto_inmueble(state: State<'_, DbState>, id: i64) -> Resul
     cliente.delete("inmueble_fotos", &format!("id=eq.{}", id)).await.map_err(map_err)
 }
 
+// ---------- Contratos desde modelo ----------
+
+#[tauri::command]
+pub async fn get_modelos(state: State<'_, DbState>) -> Result<Vec<Value>, String> {
+    let cliente = obtener_cliente(&state).await?;
+    cliente.select("modelos_contrato", "select=*&order=id").await.map_err(map_err)
+}
+
+#[tauri::command]
+pub async fn guardar_modelo(state: State<'_, DbState>, modelo: Value) -> Result<i64, String> {
+    let cliente = obtener_cliente(&state).await?;
+    let o = modelo.as_object().ok_or("Datos inválidos")?;
+    let mut body = serde_json::Map::new();
+    for k in ["nombre", "tipo", "contenido"] {
+        if let Some(v) = o.get(k) {
+            body.insert(k.to_string(), v.clone());
+        }
+    }
+    body.insert("actualizado".into(), json!(today().format("%Y-%m-%d").to_string()));
+    match o.get("id").and_then(|v| v.as_i64()) {
+        Some(id) => {
+            cliente.update("modelos_contrato", &format!("id=eq.{}", id), &Value::Object(body)).await.map_err(map_err)?;
+            Ok(id)
+        }
+        None => {
+            let fila: FilaId = cliente.insert("modelos_contrato", &Value::Object(body)).await.map_err(map_err)?;
+            Ok(fila.id)
+        }
+    }
+}
+
+#[tauri::command]
+pub async fn eliminar_modelo(state: State<'_, DbState>, id: i64) -> Result<(), String> {
+    let cliente = obtener_cliente(&state).await?;
+    cliente.delete("modelos_contrato", &format!("id=eq.{}", id)).await.map_err(map_err)
+}
+
+/// Documentos ya generados (sin el contenido, que se pide aparte).
+#[tauri::command]
+pub async fn get_documentos(state: State<'_, DbState>) -> Result<Vec<Value>, String> {
+    let cliente = obtener_cliente(&state).await?;
+    cliente
+        .select("documentos_generados", "select=id,contrato_id,modelo_id,titulo,fecha,usuario&order=id.desc&limit=300")
+        .await
+        .map_err(map_err)
+}
+
+#[tauri::command]
+pub async fn get_documento(state: State<'_, DbState>, id: i64) -> Result<Value, String> {
+    let cliente = obtener_cliente(&state).await?;
+    let d: Option<Value> = cliente.select_uno("documentos_generados", &format!("id=eq.{}&select=*", id)).await.map_err(map_err)?;
+    d.ok_or_else(|| "El documento no existe".to_string())
+}
+
+#[tauri::command]
+pub async fn guardar_documento(state: State<'_, DbState>, documento: Value) -> Result<i64, String> {
+    let cliente = obtener_cliente(&state).await?;
+    let o = documento.as_object().ok_or("Datos inválidos")?;
+    let mut body = serde_json::Map::new();
+    for k in ["contrato_id", "modelo_id", "titulo", "contenido", "fecha", "usuario"] {
+        if let Some(v) = o.get(k) {
+            body.insert(k.to_string(), v.clone());
+        }
+    }
+    match o.get("id").and_then(|v| v.as_i64()) {
+        Some(id) => {
+            cliente.update("documentos_generados", &format!("id=eq.{}", id), &Value::Object(body)).await.map_err(map_err)?;
+            Ok(id)
+        }
+        None => {
+            let fila: FilaId = cliente.insert("documentos_generados", &Value::Object(body)).await.map_err(map_err)?;
+            Ok(fila.id)
+        }
+    }
+}
+
+#[tauri::command]
+pub async fn eliminar_documento(state: State<'_, DbState>, id: i64) -> Result<(), String> {
+    let cliente = obtener_cliente(&state).await?;
+    cliente.delete("documentos_generados", &format!("id=eq.{}", id)).await.map_err(map_err)
+}
+
+/// Guarda el documento como archivo de Word en "Documentos\Contratos Carranza"
+/// y lo abre. El contenido es HTML con los encabezados que Word reconoce.
+#[tauri::command]
+pub fn abrir_en_word<R: tauri::Runtime>(app: tauri::AppHandle<R>, nombre: String, html: String) -> Result<String, String> {
+    use tauri_plugin_opener::OpenerExt;
+    let carpeta = app.path().document_dir().map_err(map_err)?.join("Contratos Carranza");
+    std::fs::create_dir_all(&carpeta).map_err(map_err)?;
+    let limpio: String = nombre
+        .chars()
+        .map(|c| if "\\/:*?\"<>|".contains(c) { '-' } else { c })
+        .collect::<String>()
+        .trim()
+        .to_string();
+    let base = if limpio.is_empty() { "Documento".to_string() } else { limpio };
+    let mut ruta = carpeta.join(format!("{}.doc", base));
+    let mut n = 2;
+    while ruta.exists() {
+        ruta = carpeta.join(format!("{} ({}).doc", base, n));
+        n += 1;
+    }
+    // BOM para que Word respete los acentos.
+    let mut bytes = vec![0xEF, 0xBB, 0xBF];
+    bytes.extend_from_slice(html.as_bytes());
+    std::fs::write(&ruta, bytes).map_err(map_err)?;
+    let texto = ruta.to_string_lossy().to_string();
+    app.opener().open_path(texto.clone(), None::<&str>).map_err(map_err)?;
+    Ok(texto)
+}
+
 // ---------- Configuración, IPC y recordatorios ----------
 
 /// true si la base ya tiene las tablas/columnas de la versión 0.3.0.
@@ -1024,6 +1135,8 @@ pub async fn base_actualizada(state: State<'_, DbState>) -> Result<bool, String>
         ("inmueble_fotos", "select=id&limit=1"),
         ("inquilinos", "select=bcra_situacion&limit=1"),
         ("garantes", "select=bcra_detalle&limit=1"),
+        ("modelos_contrato", "select=id&limit=1"),
+        ("documentos_generados", "select=id&limit=1"),
     ];
     for (tabla, q) in chequeos {
         if cliente.select::<Value>(tabla, q).await.is_err() {
