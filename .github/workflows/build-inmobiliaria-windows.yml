@@ -53,7 +53,8 @@ jobs:
           } >> "$GITHUB_ENV"
           case "$K" in dW50cnVzdGVk*) kok="empieza bien";; "") kok="FALTA";; *) kok="NO empieza con dW50cnVzdGVk";; esac
           case "$A" in eyJ*) aok="eyJ (anon)";; sb_publishable_*) aok="sb_publishable (no es la anon legacy)";; "") aok="FALTA";; *) aok="formato desconocido";; esac
-          echo "::notice title=Claves::firma ${#K} caracteres ($kok) | contraseña ${#P} caracteres | URL ${U:-FALTA} | anon ${#A} caracteres ($aok)"
+          case "$U" in https://*.supabase.co) uok="https://….supabase.co (bien)";; "") uok="FALTA";; https://*) uok="empieza con https:// pero no termina en .supabase.co";; *) uok="NO empieza con https:// (la app lo corrige sola)";; esac
+          echo "::notice title=Claves::firma ${#K} caracteres ($kok) | contraseña ${#P} caracteres | URL $uok | anon ${#A} caracteres ($aok)"
           echo prueba > prueba-firma.txt
           if TAURI_SIGNING_PRIVATE_KEY="$K" TAURI_SIGNING_PRIVATE_KEY_PASSWORD="$P" npx tauri signer sign prueba-firma.txt > firma.log 2>&1; then
             echo "::notice title=Firma::La clave de firma y la contraseña funcionan"

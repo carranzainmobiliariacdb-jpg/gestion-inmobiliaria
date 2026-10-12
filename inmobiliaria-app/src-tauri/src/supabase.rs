@@ -49,7 +49,7 @@ pub struct Cliente {
 
 impl Cliente {
     pub fn nuevo(config: &SupabaseConfig) -> Self {
-        Self::con_base_completa(format!("{}/rest/v1", config.url.trim_end_matches('/')), config.anon_key.clone())
+        Self::con_base_completa(format!("{}/rest/v1", normalizar_url(&config.url)), normalizar_clave(&config.anon_key))
     }
 
     /// Apunta directo a la base dada, sin asumir el prefijo `/rest/v1` que
@@ -167,4 +167,51 @@ impl PeticionConstruida {
 
 fn error_de_red(e: reqwest::Error) -> ErrorSupabase {
     ErrorSupabase { codigo: None, mensaje: format!("No se pudo comunicar con Supabase: {}", e) }
+}
+
+/// Acepta la URL del proyecto como venga pegada: sin "https://", con
+/// "/rest/v1/" al final, con espacios o barras de más.
+pub fn normalizar_url(url: &str) -> String {
+    let mut u = crate::config::limpiar(url);
+    u.retain(|c| !c.is_whitespace());
+    let mut u = u.trim_end_matches('/').to_string();
+    if let Some(sin) = u.strip_suffix("/rest/v1") {
+        u = sin.trim_end_matches('/').to_string();
+    }
+    if !u.starts_with("http://") && !u.starts_with("https://") {
+        u = format!("https://{}", u);
+    }
+    u
+}
+
+/// La clave nunca lleva espacios ni saltos de línea: se sacan los que se
+/// cuelan al copiarla y pegarla.
+pub fn normalizar_clave(clave: &str) -> String {
+    let mut c = crate::config::limpiar(clave);
+    c.retain(|ch| !ch.is_whitespace());
+    c
+}
+
+#[cfg(test)]
+mod tests_normalizar {
+    use super::*;
+
+    #[test]
+    fn normaliza_urls_pegadas_de_distintas_formas() {
+        for u in [
+            "https://abc.supabase.co",
+            "https://abc.supabase.co/",
+            "https://abc.supabase.co/rest/v1/",
+            " abc.supabase.co ",
+            "abc.supabase.co/rest/v1",
+            "\"https://abc.supabase.co\"",
+        ] {
+            assert_eq!(normalizar_url(u), "https://abc.supabase.co", "{}", u);
+        }
+    }
+
+    #[test]
+    fn saca_espacios_y_saltos_de_la_clave() {
+        assert_eq!(normalizar_clave(" eyJhb\nGci OiJ \r\n"), "eyJhbGciOiJ");
+    }
 }
