@@ -28,6 +28,41 @@ jobs:
       - name: Instalar dependencias del frontend
         run: npm install
 
+      # Revisa las 4 claves (sin mostrarlas), les saca espacios o saltos de
+      # línea que se cuelan al pegarlas en GitHub y prueba la firma antes de
+      # compilar: si la clave o la contraseña no coinciden, falla en segundos
+      # con un aviso claro en vez de después de 9 minutos.
+      - name: Revisar las claves
+        shell: bash
+        env:
+          K: ${{ secrets.TAURI_SIGNING_PRIVATE_KEY }}
+          P: ${{ secrets.TAURI_SIGNING_PRIVATE_KEY_PASSWORD }}
+          U: ${{ secrets.INMOBILIARIA_SUPABASE_URL }}
+          A: ${{ secrets.INMOBILIARIA_SUPABASE_ANON_KEY }}
+        run: |
+          K=$(printf '%s' "$K" | tr -d '[:space:]')
+          P=$(printf '%s' "$P" | tr -d '\r\n' | sed -e 's/^[[:space:]]*//' -e 's/[[:space:]]*$//')
+          U=$(printf '%s' "$U" | tr -d '[:space:]' | sed -e 's#/rest/v1/*$##' -e 's#/*$##')
+          A=$(printf '%s' "$A" | tr -d '[:space:]')
+          for v in "$K" "$P" "$A"; do [ -n "$v" ] && echo "::add-mask::$v"; done
+          {
+            echo "TAURI_SIGNING_PRIVATE_KEY=$K"
+            echo "TAURI_SIGNING_PRIVATE_KEY_PASSWORD=$P"
+            echo "INMOBILIARIA_SUPABASE_URL=$U"
+            echo "INMOBILIARIA_SUPABASE_ANON_KEY=$A"
+          } >> "$GITHUB_ENV"
+          case "$K" in dW50cnVzdGVk*) kok="empieza bien";; "") kok="FALTA";; *) kok="NO empieza con dW50cnVzdGVk";; esac
+          case "$A" in eyJ*) aok="eyJ (anon)";; sb_publishable_*) aok="sb_publishable (no es la anon legacy)";; "") aok="FALTA";; *) aok="formato desconocido";; esac
+          echo "::notice title=Claves::firma ${#K} caracteres ($kok) | contraseña ${#P} caracteres | URL ${U:-FALTA} | anon ${#A} caracteres ($aok)"
+          echo prueba > prueba-firma.txt
+          if TAURI_SIGNING_PRIVATE_KEY="$K" TAURI_SIGNING_PRIVATE_KEY_PASSWORD="$P" npx tauri signer sign prueba-firma.txt > firma.log 2>&1; then
+            echo "::notice title=Firma::La clave de firma y la contraseña funcionan"
+          else
+            echo "::error title=Firma::La clave de firma o la contraseña no funcionan: $(grep -iv 'secret' firma.log | tail -3 | tr '\n' ' ' | cut -c1-300)"
+            exit 1
+          fi
+          rm -f prueba-firma.txt prueba-firma.txt.sig firma.log
+
       # Publica un GitHub Release con el instalador firmado + latest.json —
       # así el updater automático de la app (ver revisar_actualizaciones en
       # src-tauri/src/commands.rs) tiene de dónde leer la última versión.
@@ -35,10 +70,6 @@ jobs:
         uses: tauri-apps/tauri-action@v0
         env:
           GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}
-          TAURI_SIGNING_PRIVATE_KEY: ${{ secrets.TAURI_SIGNING_PRIVATE_KEY }}
-          TAURI_SIGNING_PRIVATE_KEY_PASSWORD: ${{ secrets.TAURI_SIGNING_PRIVATE_KEY_PASSWORD }}
-          INMOBILIARIA_SUPABASE_URL: ${{ secrets.INMOBILIARIA_SUPABASE_URL }}
-          INMOBILIARIA_SUPABASE_ANON_KEY: ${{ secrets.INMOBILIARIA_SUPABASE_ANON_KEY }}
         with:
           projectPath: inmobiliaria-app
           tagName: v__VERSION__
