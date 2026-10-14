@@ -144,6 +144,7 @@ function switchView(view) {
   }
   if (view === "configuracion") renderConfig();
   if (view === "documentos") renderDocumentos();
+  if (view === "servicios") renderServicios();
 }
 
 // Buscadores de las tablas
@@ -416,6 +417,7 @@ async function loadAll() {
 }
 
 function renderTodo() {
+  if ($("view-servicios").classList.contains("active")) renderServicios();
   renderUsuarios();
   renderPersonas("propietarios");
   renderPersonas("inquilinos");
@@ -680,6 +682,8 @@ function avisosServicios() {
     out.push({
       contrato_id: c?.id ?? null,
       tipo: "servicio",
+      servicio: f.servicio,
+      cuenta: f.cuenta,
       referencia: `${f.servicio}:${normCuenta(f.cuenta)}:${venc.map((d) => d.periodo).join(",")}`,
       telefono: c?.inquilino_telefono,
       nombre: c?.inquilino_nombre || (inm ? "Sin inquilino activo" : "Sin vincular"),
@@ -731,7 +735,75 @@ function panelServiciosHtml() {
 
 function refrescarPanelServicios() {
   if (avisosTab === "servicios" && $("view-avisos")?.classList.contains("active")) renderAvisos();
+  if ($("view-servicios")?.classList.contains("active")) renderServicios();
 }
+
+// ---------- Vista «Servicios» ----------
+
+let serviciosAvisos = [];
+
+function renderServicios() {
+  $("servicios-panel").innerHTML = panelServiciosHtml();
+  const hoy = hoyIso();
+  const filtro = $("servicios-filtro").value;
+  const q = $("servicios-buscar").value.trim().toLowerCase();
+  const avisos = avisosServicios();
+  for (const a of avisos) {
+    a.enviado = ultimoAviso(a.contrato_id, a.tipo, a.referencia);
+    a.telValido = !!telefonoWhatsapp(a.telefono, cfg("wa_codigo_area"));
+  }
+  serviciosAvisos = avisos;
+  const filas = (state.servicios || [])
+    .filter((f) => f.servicio === "luz")
+    .map((f) => {
+      const inm = inmueblePorCuenta(f.servicio, f.cuenta);
+      const c = inm ? contratoActivoDe(inm.id) : null;
+      const venc = docsVencidos(f, hoy);
+      const total = venc.reduce((a, d) => a + Number(d.importe || 0), 0);
+      const ai = avisos.findIndex((a) => a.servicio === f.servicio && normCuenta(a.cuenta) === normCuenta(f.cuenta));
+      return { f, inm, c, venc, total, ai };
+    })
+    .filter((x) => filtro !== "vencidos" || x.venc.length)
+    .filter((x) => filtro !== "sinvincular" || !x.inm)
+    .sort((a, b) => b.total - a.total || String(a.inm?.direccion || a.f.direccion).localeCompare(String(b.inm?.direccion || b.f.direccion)));
+  const html = filas.map(({ f, inm, c, venc, total, ai }) => {
+    const docs = (f.documentos || [])
+      .map((d) => {
+        const v = venc.includes(d);
+        return `<span class="sub-line">${v ? "🔴" : "🟢"} ${esc(periodoTitulo(periodoMmAaaa(d.periodo)))} · ${money(d.importe)} · vence ${esc(d.vencimiento)}</span>`;
+      })
+      .join("");
+    const a = ai >= 0 ? avisos[ai] : null;
+    let accion = "";
+    if (a) {
+      if (a.motivo) accion = `<span class="pill pill-warning">${esc(a.motivo)}</span>`;
+      else if (!a.telValido) accion = `<span class="pill pill-danger">Falta teléfono</span>`;
+      else
+        accion = `${a.enviado ? `<div class="aviso-enviado">✓ Avisado ${fmtDate(a.enviado.fecha)}</div>` : ""}<button class="btn-whatsapp btn-sm" data-serv-wa="${ai}">${ICONO_WA} ${a.enviado ? "Reenviar" : "Avisar"}</button>`;
+    }
+    const fila = `<tr>
+      <td>${inm ? `${codHtml(inm.codigo)}${esc(inm.direccion)}` : `${esc(f.direccion || "")} <span class="pill pill-warning">sin vincular</span>`}
+        <span class="sub-line">⚡ EPEC contrato ${esc(f.cuenta)} · ${esc(f.referencia || f.titular || "")}</span></td>
+      <td>${c ? `${esc(c.inquilino_nombre)}<span class="sub-line">${esc(c.inquilino_telefono || "sin teléfono")}</span>` : `<span class="sub-line">${inm ? "Sin contrato activo" : "—"}</span>`}</td>
+      <td>${docs || `<span class="sub-line">Nada a pagar</span>`}${f.error ? `<span class="sub-line">⚠ ${esc(f.error)}</span>` : ""}</td>
+      <td>${venc.length ? `<span class="pill pill-danger">${money(total)}</span>` : `<span class="pill pill-ok">Al día</span>`}</td>
+      <td class="actions">${accion}</td></tr>`;
+    return !q || fila.toLowerCase().replace(/<[^>]+>/g, " ").includes(q) ? fila : "";
+  });
+  const visibles = html.filter(Boolean);
+  $("tbl-servicios").innerHTML = visibles.length
+    ? visibles.join("")
+    : vacio(5, (state.servicios || []).length ? "No hay servicios con ese filtro" : "Todavía no se revisó EPEC. Tocá «Revisar EPEC ahora».");
+}
+
+$("servicios-filtro").addEventListener("change", renderServicios);
+$("servicios-buscar").addEventListener("input", renderServicios);
+document.addEventListener("click", async (e) => {
+  const b = e.target.closest("[data-serv-wa]");
+  if (!b) return;
+  const a = serviciosAvisos[Number(b.dataset.servWa)];
+  if (a && (await enviarWhatsapp(a))) renderServicios();
+});
 
 async function revisarEpec({ visible = false } = {}) {
   if (epecPoll) return toast("La revisión de EPEC ya está en curso");
@@ -1034,6 +1106,9 @@ function actualizarBadges() {
     const aum = contratosActivos().filter((c) => c.proxima_actualizacion && diasEntre(hoy, c.proxima_actualizacion) <= 15 && c.proxima_actualizacion <= c.fecha_fin).length;
     $("badge-aumentos").textContent = aum;
     $("badge-aumentos").classList.toggle("hidden", !aum);
+    const serv = g.servicios.filter((a) => !a.motivo && !a.enviado).length;
+    $("badge-servicios").textContent = serv;
+    $("badge-servicios").classList.toggle("hidden", !serv);
   } catch (e) {
     console.error(e);
   }
