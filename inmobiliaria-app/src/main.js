@@ -97,6 +97,8 @@ async function call(cmd, args) {
 }
 
 const byId = (list, id) => list.find((x) => x.id === id);
+/** Cobro registrado en la carga inicial (pagado antes de usar la app): no tiene recibo ni se liquida desde acá. */
+const esCargaInicial = (p) => Number(p?.numero_recibo) === 0;
 const usuarioNombre = () => state.usuarioActual?.nombre_completo || "";
 const $ = (id) => document.getElementById(id);
 const vacio = (cols, txt) => `<tr class="empty-row"><td colspan="${cols}">${txt}</td></tr>`;
@@ -476,7 +478,7 @@ async function renderDashboard() {
   const cobradoMes = state.pagos.filter((p) => p.periodo === mes).reduce((a, p) => a + p.monto_total, 0);
   const pendienteMes = pendientes.reduce((a, c) => a + c.monto_vigente, 0);
   const liquidados = new Set(state.liquidaciones.map((l) => l.pago_id));
-  const sinLiquidar = state.pagos.filter((p) => !liquidados.has(p.id));
+  const sinLiquidar = state.pagos.filter((p) => !liquidados.has(p.id) && !esCargaInicial(p));
   const aLiquidar = sinLiquidar.reduce((a, p) => {
     const c = byId(state.contratos, p.contrato_id);
     return a + (p.monto_alquiler + p.monto_mora + (p.monto_multa || 0)) - p.monto_alquiler * ((c?.comision_porcentaje || 0) / 100);
@@ -496,7 +498,7 @@ async function renderDashboard() {
       const venc = vencimientoDe(mes, c.dia_pago);
       const dd = diasEntre(hoy, venc);
       let estado;
-      if (pago) estado = `<span class="pill pill-ok">Cobrado · N° ${pago.numero_recibo}</span>`;
+      if (pago) estado = `<span class="pill pill-ok">Cobrado · ${esCargaInicial(pago) ? "sin recibo" : "N° " + pago.numero_recibo}</span>`;
       else if (dd < 0) estado = `<span class="pill pill-danger">Vencido ${diasTexto(dd)}</span>`;
       else if (dd <= 5) estado = `<span class="pill pill-warning">Vence ${diasTexto(dd)}</span>`;
       else estado = `<span class="pill pill-gris">Vence ${diasTexto(dd)}</span>`;
@@ -2253,12 +2255,12 @@ function renderPagos() {
       const c = byId(state.contratos, p.contrato_id);
       const liq = liquidados.get(p.id);
       return `<tr>
-      <td><b>${p.numero_recibo}</b></td><td>${fmtDate(p.fecha_pago)}</td>
+      <td><b>${esCargaInicial(p) ? "—" : p.numero_recibo}</b></td><td>${fmtDate(p.fecha_pago)}</td>
       <td>${c ? `${codHtml(c.inmueble_codigo)}${esc(c.inmueble_direccion)}<span class="sub-line">${esc(c.inquilino_nombre)}</span>` : "(contrato eliminado)"}</td>
       <td>${periodoTitulo(p.periodo)}</td><td>${esc(p.metodo_pago || "-")}</td>
       <td class="num"><b>${money(p.monto_total)}</b>${p.dias_mora > 0 ? `<span class="sub-line">${p.dias_mora} días de atraso</span>` : ""}</td>
-      <td>${liq ? `<span class="pill pill-ok">N° ${liq}</span>` : '<span class="pill pill-warning">Pendiente</span>'}</td>
-      <td class="actions"><button class="btn-link" data-recibo="${p.id}">Ver recibo</button><button class="btn-link peligro" data-del-pago="${p.id}">Anular</button></td></tr>`;
+      <td>${liq ? `<span class="pill pill-ok">N° ${liq}</span>` : esCargaInicial(p) ? '<span class="pill pill-gris">Fuera de la app</span>' : '<span class="pill pill-warning">Pendiente</span>'}</td>
+      <td class="actions">${esCargaInicial(p) ? '<span class="sub-line">Carga inicial</span>' : `<button class="btn-link" data-recibo="${p.id}">Ver recibo</button>`}<button class="btn-link peligro" data-del-pago="${p.id}">Anular</button></td></tr>`;
     })
     .join("");
   aplicarBusqueda("tbl-pagos");
@@ -2375,7 +2377,7 @@ async function abrirCobro(contratoId = null, periodo = null) {
         ${codHtml(c.inmueble_codigo)}${esc(c.inmueble_direccion)}<br/>
         Propietario: ${esc(c.propietario_nombre)}<br/>
         Contrato N° ${esc(c.numero ?? c.id)} · ${periodoTitulo(per)} — Mes ${mes.mes}/${mes.total}<br/>
-        Último pago: ${ult ? `${periodoTitulo(ult.periodo)} (recibo ${ult.numero_recibo})` : "ninguno"}
+        Último pago: ${ult ? `${periodoTitulo(ult.periodo)} (${esCargaInicial(ult) ? "sin recibo" : "recibo " + ult.numero_recibo})` : "ninguno"}
         ${ya ? `<br/><span class="pill pill-danger">Este período ya se cobró (recibo ${ya.numero_recibo})</span>` : ""}
       </div>
       <div class="res-fila"><span>Alquiler</span><span>${money(t.alquiler)}</span></div>
@@ -2494,7 +2496,7 @@ async function verRecibo(pagoId) {
 
 function pagosSinLiquidar() {
   const liquidados = new Set(state.liquidaciones.map((l) => l.pago_id));
-  return state.pagos.filter((p) => !liquidados.has(p.id));
+  return state.pagos.filter((p) => !liquidados.has(p.id) && !esCargaInicial(p));
 }
 
 function propietarioDePago(p) {
@@ -3364,3 +3366,106 @@ async function arrancar() {
 }
 
 arrancar().catch((e) => console.error(e));
+
+// ---------- Carga inicial de contratos (archivo JSON preparado desde la carpeta) ----------
+
+$("btn-carga-inicial").addEventListener("click", () => $("carga-inicial-file").click());
+$("carga-inicial-file").addEventListener("change", async (e) => {
+  const f = e.target.files[0];
+  e.target.value = "";
+  if (!f) return;
+  let datos;
+  try {
+    datos = JSON.parse(await f.text());
+    if (!Array.isArray(datos.contratos)) throw new Error("sin contratos");
+  } catch {
+    return toast("Ese archivo no es una carga inicial válida", true);
+  }
+  abrirCargaInicial(datos);
+});
+
+/** Monto vigente a octubre aplicando los aumentos del archivo con el redondeo elegido. */
+function montoCarga(c, paso) {
+  let m = Number(c.contrato.monto_inicial) || 0;
+  const montos = [];
+  for (const p of c.pasos || []) {
+    m = paso > 1 ? Math.round((m * p.ratio) / paso) * paso : Math.round(m * p.ratio * 100) / 100;
+    montos.push(m);
+  }
+  return { final: m, montos };
+}
+
+function abrirCargaInicial(datos) {
+  const normDni = (v) => String(v || "").replace(/\D/g, "");
+  const yaEsta = (c) => {
+    const inq = state.inquilinos.find((p) => normDni(p.dni_cuit) && normDni(p.dni_cuit) === normDni(c.inquilino.dni_cuit));
+    return inq && state.contratos.some((k) => k.inquilino_id === inq.id && k.fecha_inicio === c.contrato.fecha_inicio);
+  };
+  const pasoInicial = String(Number(cfg("aumento_redondeo")) || 1);
+  const html = () => {
+    const paso = Number($("ci-redondeo")?.value || pasoInicial);
+    const filas = datos.contratos
+      .map((c, i) => {
+        const k = c.contrato;
+        const { final, montos } = montoCarga(c, paso);
+        const esta = yaEsta(c);
+        const aum = (c.pasos || []).map((p, j) => `<div class="ci-paso">${fmtDate(p.fecha_vigencia)}: +${((p.ratio - 1) * 100).toFixed(2)}% → <b>${money(montos[j])}</b><br/><span class="muted">${esc(p.detalle)}</span></div>`).join("");
+        const rev = (c.revisar || []).map((r) => `<span class="sub-line">⚠ ${esc(r)}</span>`).join("");
+        return `<tr class="${esta ? "muted" : ""}">
+          <td><input type="checkbox" class="ci-check" value="${i}" ${esta ? "" : "checked"} ${esta ? "disabled" : ""} /></td>
+          <td><b>${esc(c.inquilino.nombre)}</b><span class="sub-line">Prop.: ${esc(c.propietario.nombre)}</span><span class="sub-line">Garantes: ${esc((c.garantes || []).map((g) => g.nombre).join(", ") || "—")}</span></td>
+          <td>${esc(c.inmueble.direccion)}${c.inmueble.piso_depto ? " · " + esc(c.inmueble.piso_depto) : ""}<span class="sub-line">${esc(c.carpeta)}</span></td>
+          <td>${fmtDate(k.fecha_inicio)} → ${fmtDate(k.fecha_fin)}<span class="sub-line">${esc(k.tipo_actualizacion === "porcentaje_fijo" ? "Sin actualización" : k.tipo_actualizacion + " c/" + k.frecuencia_actualizacion_meses + " meses")}</span></td>
+          <td class="num">${money(k.monto_inicial)}</td>
+          <td class="ci-aum">${aum || '<span class="muted">Sin aumentos hasta octubre</span>'}</td>
+          <td class="num"><b>${money(final)}</b><span class="sub-line">${c.pagar_octubre && k.fecha_inicio <= "2026-10-01" ? "Octubre pagado" : "Sin octubre"}</span></td>
+          <td>${esta ? '<span class="pill pill-gris">Ya está cargado</span>' : ""}${rev}</td></tr>`;
+      })
+      .join("");
+    const nc = (datos.no_cargados || []).map((n) => `<li><b>${esc(n.carpeta)}</b>: ${esc(n.motivo)}</li>`).join("");
+    return `<p class="hint">Revisá cada contrato antes de importar. Los montos de octubre salen de aplicar los aumentos del contrato (ICL del BCRA / IPC del INDEC) sobre el monto inicial.
+        Octubre queda como <b>cobrado sin recibo</b> (no usa numeración ni aparece para liquidar). Lo que ya esté cargado no se duplica.</p>
+      <div class="toolbar"><label>Redondear cada aumento a múltiplos de&nbsp;</label>
+        <select id="ci-redondeo">${[["1", "pesos exactos"], ["100", "$100"], ["1000", "$1.000"], ["10000", "$10.000"]].map(([v, l]) => `<option value="${v}" ${String(paso) === v ? "selected" : ""}>${l}</option>`).join("")}</select>
+        <span class="muted">Ej.: Mendoza Este 290 da ${money(389324.6)} exacto; en el balance de octubre figura $390.000.</span></div>
+      <div class="table-wrap"><table class="data-table ci-tabla"><thead><tr><th></th><th>Inquilino</th><th>Inmueble</th><th>Plazo</th><th class="num">Monto contrato</th><th>Aumentos aplicados</th><th class="num">Alquiler octubre</th><th>Para revisar</th></tr></thead><tbody>${filas}</tbody></table></div>
+      ${nc ? `<div class="form-section" style="margin-top:14px">No se cargan</div><ul class="hint">${nc}</ul>` : ""}`;
+  };
+  openModal({
+    title: `Carga inicial — ${datos.contratos.length} contratos`,
+    size: "xl",
+    html: `<div id="ci-cuerpo">${html()}</div>`,
+    saveLabel: "Importar seleccionados",
+    onMount: () => {
+      const cuerpo = $("ci-cuerpo");
+      cuerpo.addEventListener("change", (e) => {
+        if (e.target.id === "ci-redondeo") {
+          const marcados = new Set([...cuerpo.querySelectorAll(".ci-check:checked")].map((x) => x.value));
+          cuerpo.innerHTML = html();
+          cuerpo.querySelectorAll(".ci-check").forEach((x) => (x.checked = !x.disabled && marcados.has(x.value)));
+          $("ci-redondeo").value = e.target.value;
+        }
+      });
+    },
+    onSave: async () => {
+      const incluir = [...document.querySelectorAll(".ci-check:checked")].map((x) => Number(x.value));
+      if (!incluir.length) {
+        toast("No hay contratos seleccionados", true);
+        return false;
+      }
+      const redondeo = Number($("ci-redondeo").value) || 1;
+      if (!confirm(`Se van a cargar ${incluir.length} contratos con sus propietarios, inquilinos, garantes, inmuebles, aumentos y octubre cobrado. ¿Seguir?`)) return false;
+      modalSave.textContent = "Importando…";
+      const r = await call("importar_carga_inicial", { datos, incluir, redondeo, usuario: usuarioNombre() });
+      await loadAll();
+      const errores = r.detalle.filter((d) => d.estado === "error");
+      openModal({
+        title: "Carga inicial terminada",
+        sinGuardar: true,
+        html: `<p><b>${r.contratos_cargados}</b> contratos cargados · ${r.contratos_que_ya_estaban} ya estaban · ${r.personas_nuevas} personas nuevas · ${r.inmuebles_nuevos} inmuebles nuevos · ${r.pagos_octubre} octubres registrados como cobrados.</p>
+          ${errores.length ? `<p class="pill pill-danger">Con error: ${errores.length}</p><ul>${errores.map((e) => `<li>${esc(e.inquilino)}: ${esc(e.error)}</li>`).join("")}</ul>` : "<p>Sin errores.</p>"}`,
+      });
+      return false; // queda abierto el resumen
+    },
+  });
+}

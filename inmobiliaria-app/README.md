@@ -73,6 +73,11 @@ PCs que se conecten al mismo proyecto ven y cargan los mismos datos.
   inmueble («Luz (N° de contrato)») y las facturas vencidas aparecen en
   Avisos → Servicios con WhatsApp al inquilino activo. Se revisa sola una vez
   por día al entrar (`src-tauri/src/servicios.rs`, `epec_revisor.js`).
+- **Carga inicial** (Contratos → «Importar carga inicial»): lee un JSON con
+  propietarios, inquilinos, garantes, inmuebles, contratos, aumentos ya
+  aplicados (ICL/IPC) y el mes cobrado; muestra todo para revisar y lo carga
+  sin duplicar. Los cobros de la carga inicial quedan «sin recibo» (N° 0) y no
+  aparecen para liquidar (`src-tauri/src/carga.rs`).
 - **Configuración** compartida entre PCs: datos de la inmobiliaria, logo y
   numeración del recibo, mensajes de WhatsApp, IPC manual.
 - **Login** con usuarios compartidos entre todas las PCs.

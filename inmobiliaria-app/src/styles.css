@@ -509,3 +509,10 @@ small.muted { font-size: 12px; }
 .servicios-panel-fila { display: flex; gap: 16px; align-items: center; justify-content: space-between; flex-wrap: wrap; }
 .servicios-panel-fila .sub-line:empty { display: none; }
 .servicios-panel .sub-line { display: block; font-size: 12px; color: var(--text-muted); margin-top: 2px; }
+
+/* Carga inicial */
+.ci-tabla td { vertical-align: top; }
+.ci-tabla td:nth-child(2), .ci-tabla td:nth-child(3) { min-width: 170px; }
+.ci-aum { min-width: 240px; max-width: 320px; font-size: 12px; white-space: normal; }
+.ci-paso + .ci-paso { margin-top: 6px; }
+.ci-tabla td:last-child { min-width: 220px; max-width: 320px; white-space: normal; }

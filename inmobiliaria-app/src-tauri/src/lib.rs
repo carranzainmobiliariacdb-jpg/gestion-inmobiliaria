@@ -5,6 +5,7 @@ mod icl;
 mod ipc;
 mod models;
 mod servicios;
+mod carga;
 mod supabase;
 
 pub use commands::DbState;
@@ -105,6 +106,7 @@ pub fn manejador<R: tauri::Runtime>() -> impl Fn(tauri::ipc::Invoke<R>) -> bool 
         servicios::epec_cerrar,
         servicios::get_servicios_estado,
         servicios::guardar_servicios_estado,
+        carga::importar_carga_inicial,
     ]
 }
 

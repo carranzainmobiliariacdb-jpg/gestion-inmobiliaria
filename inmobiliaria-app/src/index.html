@@ -134,7 +134,8 @@
       <section id="view-contratos" class="view">
         <header class="view-header">
           <div><h1>Contratos</h1><p class="sub">Vinculan propiedad, propietario, inquilino y garantes.</p></div>
-          <div class="header-actions"><button class="btn-primary" id="btn-nuevo-contrato">+ Nuevo contrato</button></div>
+          <div class="header-actions"><button class="btn-secondary" id="btn-carga-inicial">⇪ Importar carga inicial</button><button class="btn-primary" id="btn-nuevo-contrato">+ Nuevo contrato</button></div>
+          <input type="file" id="carga-inicial-file" accept=".json,application/json" class="hidden" />
         </header>
         <div class="toolbar"><input class="search" data-search="tbl-contratos" placeholder="Buscar…" />
           <select id="filtro-contratos"><option value="activo">Activos</option><option value="">Todos</option><option value="finalizado">Finalizados</option><option value="rescindido">Rescindidos</option></select></div>
