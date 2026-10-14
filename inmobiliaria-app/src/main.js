@@ -1280,6 +1280,7 @@ function inmuebleFields() {
     { type: "html", html: "<div></div><div></div>" },
     { type: "section", label: "Servicios" },
     { name: "servicio_luz", label: "Luz (N° de cliente)" },
+    { name: "servicio_luz_contrato", label: "Luz (N° de contrato)", hint: "EPEC" },
     { name: "servicio_agua", label: "Agua (N° de cuenta)" },
     { name: "servicio_gas", label: "Gas (N° de cuenta)" },
     { name: "llaves", label: "Llaves", placeholder: "¿Dónde están? ¿cuántas copias?" },
@@ -2848,7 +2849,7 @@ async function verificarBase() {
     return true;
   }
   try {
-    const partes = await Promise.all(["migracion-0.3.0.sql", "migracion-0.4.0.sql", "migracion-0.5.0.sql"].map(async (f) => (await fetch(f)).text()));
+    const partes = await Promise.all(["migracion-0.3.0.sql", "migracion-0.4.0.sql", "migracion-0.5.0.sql", "migracion-0.8.0.sql"].map(async (f) => (await fetch(f)).text()));
     $("migracion-sql").value = partes.join("\n\n");
   } catch {
     $("migracion-sql").value = "No se pudo leer el archivo de migración.";

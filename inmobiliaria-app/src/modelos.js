@@ -143,7 +143,8 @@ export function valoresContrato({ contrato: c, propietario, inquilino, garantes 
     cuenta_rentas: inmueble.cuenta_rentas,
     cuenta_municipal: inmueble.cuenta_municipal,
     servicios: [
-      inmueble.servicio_luz && `luz: ${inmueble.servicio_luz}`,
+      inmueble.servicio_luz && `luz: ${inmueble.servicio_luz}${inmueble.servicio_luz_contrato ? ` (contrato ${inmueble.servicio_luz_contrato})` : ""}`,
+      !inmueble.servicio_luz && inmueble.servicio_luz_contrato && `luz: contrato ${inmueble.servicio_luz_contrato}`,
       inmueble.servicio_agua && `agua: ${inmueble.servicio_agua}`,
       inmueble.servicio_gas && `gas: ${inmueble.servicio_gas}`,
     ].filter(Boolean).join("; "),

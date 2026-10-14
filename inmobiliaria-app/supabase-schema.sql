@@ -193,6 +193,7 @@ ALTER TABLE inmuebles ADD COLUMN IF NOT EXISTS cuenta_rentas TEXT;
 ALTER TABLE inmuebles ADD COLUMN IF NOT EXISTS cuenta_municipal TEXT;
 ALTER TABLE inmuebles ADD COLUMN IF NOT EXISTS matricula TEXT;
 ALTER TABLE inmuebles ADD COLUMN IF NOT EXISTS servicio_luz TEXT;
+ALTER TABLE inmuebles ADD COLUMN IF NOT EXISTS servicio_luz_contrato TEXT;
 ALTER TABLE inmuebles ADD COLUMN IF NOT EXISTS servicio_agua TEXT;
 ALTER TABLE inmuebles ADD COLUMN IF NOT EXISTS servicio_gas TEXT;
 ALTER TABLE inmuebles ADD COLUMN IF NOT EXISTS llaves TEXT;

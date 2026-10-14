@@ -270,8 +270,8 @@ const COLS_BCRA: &[&str] = &["bcra_situacion", "bcra_fecha", "bcra_detalle"];
 const COLS_INMUEBLE: &[&str] = &[
     "propietario_id", "codigo", "direccion", "piso_depto", "localidad", "provincia", "codigo_postal", "tipo", "destino",
     "estado", "superficie", "superficie_cubierta", "ambientes", "dormitorios", "banos", "cochera", "patio", "amoblado",
-    "nomenclatura_catastral", "cuenta_rentas", "cuenta_municipal", "matricula", "servicio_luz", "servicio_agua",
-    "servicio_gas", "llaves", "notas",
+    "nomenclatura_catastral", "cuenta_rentas", "cuenta_municipal", "matricula", "servicio_luz", "servicio_luz_contrato",
+    "servicio_agua", "servicio_gas", "llaves", "notas",
 ];
 
 fn columnas_de(tabla: &str) -> Result<Vec<&'static str>, String> {
@@ -1137,6 +1137,7 @@ pub async fn base_actualizada(state: State<'_, DbState>) -> Result<bool, String>
         ("garantes", "select=bcra_detalle&limit=1"),
         ("modelos_contrato", "select=id&limit=1"),
         ("documentos_generados", "select=id&limit=1"),
+        ("inmuebles", "select=servicio_luz_contrato&limit=1"),
     ];
     for (tabla, q) in chequeos {
         if cliente.select::<Value>(tabla, q).await.is_err() {

@@ -72,7 +72,8 @@ PCs que se conecten al mismo proyecto ven y cargan los mismos datos.
 
 ## Actualizar la base (una sola vez por versión)
 
-La v0.5.0 agrega los modelos y documentos generados
+La v0.8.0 agrega el N° de contrato de luz (EPEC) en el inmueble
+([`src/migracion-0.8.0.sql`](./src/migracion-0.8.0.sql)). La v0.5.0 agrega los modelos y documentos generados
 ([`src/migracion-0.5.0.sql`](./src/migracion-0.5.0.sql)). La v0.4.0 agrega la tabla de fotos y la consulta al BCRA
 ([`src/migracion-0.4.0.sql`](./src/migracion-0.4.0.sql)); la app muestra
 las migraciones pendientes juntas con un botón **Copiar**.
