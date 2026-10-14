@@ -1,4 +1,4 @@
-//! Revisión de deudas de servicios (luz de EPEC).
+//! Revisión de deudas de servicios (luz de EPEC, gas de Emprendimientos 2001).
 //!
 //! La app abre una ventana propia con la Oficina Virtual de EPEC. La primera
 //! vez la persona inicia sesión ahí (con "Recordar", la sesión dura años y la
@@ -11,28 +11,47 @@
 
 use crate::commands::DbState;
 use serde_json::{json, Value};
+use std::collections::HashMap;
 use std::sync::Mutex;
 use tauri::{Manager, State, WebviewUrl, WebviewWindowBuilder};
 
-const VENTANA_EPEC: &str = "epec";
-const URL_EPEC: &str = "https://www.epec.com.ar/oficina-virtual/mis-pagos";
 const REPORTE_HOST: &str = "reporte.gestion-inmobiliaria.invalid";
-const SCRIPT_EPEC: &str = include_str!("epec_revisor.js");
 
-/// Último estado informado por la ventana de EPEC.
-pub struct EpecState(pub Mutex<Value>);
+/// Ventana, página inicial, script y título de cada empresa de servicios.
+struct Fuente {
+    ventana: &'static str,
+    url: &'static str,
+    script: &'static str,
+    titulo: &'static str,
+}
 
-impl Default for EpecState {
-    fn default() -> Self {
-        EpecState(Mutex::new(json!({ "estado": "inactivo" })))
+fn fuente(servicio: &str) -> Result<Fuente, String> {
+    match servicio {
+        "luz" => Ok(Fuente {
+            ventana: "epec",
+            url: "https://www.epec.com.ar/oficina-virtual/mis-pagos",
+            script: include_str!("epec_revisor.js"),
+            titulo: "EPEC — Oficina Virtual (Gestión Inmobiliaria)",
+        }),
+        "gas" => Ok(Fuente {
+            ventana: "gas2001",
+            url: "https://www.cooponlineweb.com.ar/EMPRENDIMIENTOS2001/Principal",
+            script: include_str!("gas_revisor.js"),
+            titulo: "Emprendimientos 2001 — Gas (Gestión Inmobiliaria)",
+        }),
+        _ => Err(format!("Servicio no soportado: {}", servicio)),
     }
 }
+
+/// Último estado informado por cada ventana ("luz", "gas").
+#[derive(Default)]
+pub struct ServiciosState(pub Mutex<HashMap<String, Value>>);
 
 fn map_err<E: std::fmt::Display>(e: E) -> String {
     e.to_string()
 }
 
-fn recibir_reporte<R: tauri::Runtime>(app: &tauri::AppHandle<R>, fragmento: &str) {
+fn recibir_reporte<R: tauri::Runtime>(app: &tauri::AppHandle<R>, servicio: &str, fragmento: &str) {
     let texto = percent_encoding::percent_decode_str(fragmento).decode_utf8_lossy().to_string();
     let Ok(mut valor) = serde_json::from_str::<Value>(&texto) else {
         return;
@@ -40,32 +59,37 @@ fn recibir_reporte<R: tauri::Runtime>(app: &tauri::AppHandle<R>, fragmento: &str
     if let Some(o) = valor.as_object_mut() {
         o.insert("momento".into(), json!(chrono::Local::now().format("%Y-%m-%d %H:%M:%S").to_string()));
     }
-    if let Some(st) = app.try_state::<EpecState>() {
-        if let Ok(mut actual) = st.0.lock() {
+    if let Some(st) = app.try_state::<ServiciosState>() {
+        if let Ok(mut mapa) = st.0.lock() {
             // "esperando" no pisa un resultado ya terminado.
             let nuevo = valor.get("estado").and_then(Value::as_str).unwrap_or("");
-            let previo = actual.get("estado").and_then(Value::as_str).unwrap_or("");
+            let previo = mapa.get(servicio).and_then(|v| v.get("estado")).and_then(Value::as_str).unwrap_or("");
             if nuevo == "esperando" && previo == "fin" {
                 return;
             }
-            *actual = valor;
+            mapa.insert(servicio.to_string(), valor);
         }
     }
 }
 
-/// Abre (o reabre) la ventana de EPEC y empieza a revisar.
+/// Abre (o recarga) la ventana de la empresa y empieza a revisar.
 /// Tiene que ser `async`: en Windows, crear una ventana desde un comando
 /// sincrónico bloquea la app (limitación conocida de Tauri/WebView2).
-/// `visible=false` la abre oculta: se muestra sola si hace falta iniciar sesión
-/// (el frontend llama a `epec_mostrar`).
+/// `visible=false` la abre oculta: el frontend la muestra si hace falta
+/// iniciar sesión (`servicio_mostrar`).
 #[tauri::command]
-pub async fn epec_revisar<R: tauri::Runtime>(app: tauri::AppHandle<R>, estado: State<'_, EpecState>, visible: bool) -> Result<(), String> {
-    if let Ok(mut e) = estado.0.lock() {
-        *e = json!({ "estado": "abriendo" });
+pub async fn servicio_revisar<R: tauri::Runtime>(
+    app: tauri::AppHandle<R>,
+    estado: State<'_, ServiciosState>,
+    servicio: String,
+    visible: bool,
+) -> Result<(), String> {
+    let f = fuente(&servicio)?;
+    if let Ok(mut m) = estado.0.lock() {
+        m.insert(servicio.clone(), json!({ "estado": "abriendo" }));
     }
-    // Si ya está abierta, se recarga "Mis pagos" (el script vuelve a correr).
-    if let Some(v) = app.get_webview_window(VENTANA_EPEC) {
-        v.navigate(URL_EPEC.parse().map_err(map_err)?).map_err(map_err)?;
+    if let Some(v) = app.get_webview_window(f.ventana) {
+        v.navigate(f.url.parse().map_err(map_err)?).map_err(map_err)?;
         if visible {
             let _ = v.show();
             let _ = v.set_focus();
@@ -73,15 +97,16 @@ pub async fn epec_revisar<R: tauri::Runtime>(app: tauri::AppHandle<R>, estado: S
         return Ok(());
     }
     let app2 = app.clone();
-    WebviewWindowBuilder::new(&app, VENTANA_EPEC, WebviewUrl::External(URL_EPEC.parse().map_err(map_err)?))
-        .title("EPEC — Oficina Virtual (Gestión Inmobiliaria)")
+    let clave = servicio.clone();
+    WebviewWindowBuilder::new(&app, f.ventana, WebviewUrl::External(f.url.parse().map_err(map_err)?))
+        .title(f.titulo)
         .inner_size(1000.0, 760.0)
         .center()
         .visible(visible)
-        .initialization_script(SCRIPT_EPEC)
+        .initialization_script(f.script)
         .on_navigation(move |url| {
             if url.host_str() == Some(REPORTE_HOST) {
-                recibir_reporte(&app2, url.fragment().unwrap_or(""));
+                recibir_reporte(&app2, &clave, url.fragment().unwrap_or(""));
                 return false;
             }
             true
@@ -93,25 +118,28 @@ pub async fn epec_revisar<R: tauri::Runtime>(app: tauri::AppHandle<R>, estado: S
 
 /// Estado de la revisión + si la ventana sigue abierta.
 #[tauri::command]
-pub fn epec_estado<R: tauri::Runtime>(app: tauri::AppHandle<R>, estado: State<'_, EpecState>) -> Result<Value, String> {
-    let mut v = estado.0.lock().map_err(map_err)?.clone();
+pub fn servicio_estado<R: tauri::Runtime>(app: tauri::AppHandle<R>, estado: State<'_, ServiciosState>, servicio: String) -> Result<Value, String> {
+    let f = fuente(&servicio)?;
+    let mut v = estado.0.lock().map_err(map_err)?.get(&servicio).cloned().unwrap_or(json!({ "estado": "inactivo" }));
     if let Some(o) = v.as_object_mut() {
-        o.insert("ventana_abierta".into(), json!(app.get_webview_window(VENTANA_EPEC).is_some()));
+        o.insert("ventana_abierta".into(), json!(app.get_webview_window(f.ventana).is_some()));
     }
     Ok(v)
 }
 
 #[tauri::command]
-pub async fn epec_mostrar<R: tauri::Runtime>(app: tauri::AppHandle<R>) -> Result<(), String> {
-    let v = app.get_webview_window(VENTANA_EPEC).ok_or("La ventana de EPEC no está abierta")?;
+pub async fn servicio_mostrar<R: tauri::Runtime>(app: tauri::AppHandle<R>, servicio: String) -> Result<(), String> {
+    let f = fuente(&servicio)?;
+    let v = app.get_webview_window(f.ventana).ok_or("La ventana no está abierta")?;
     v.show().map_err(map_err)?;
     let _ = v.unminimize();
     v.set_focus().map_err(map_err)
 }
 
 #[tauri::command]
-pub async fn epec_cerrar<R: tauri::Runtime>(app: tauri::AppHandle<R>) -> Result<(), String> {
-    if let Some(v) = app.get_webview_window(VENTANA_EPEC) {
+pub async fn servicio_cerrar<R: tauri::Runtime>(app: tauri::AppHandle<R>, servicio: String) -> Result<(), String> {
+    let f = fuente(&servicio)?;
+    if let Some(v) = app.get_webview_window(f.ventana) {
         v.close().map_err(map_err)?;
     }
     Ok(())

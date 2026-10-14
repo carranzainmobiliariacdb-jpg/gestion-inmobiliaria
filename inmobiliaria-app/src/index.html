@@ -181,7 +181,7 @@
       <!-- SERVICIOS -->
       <section id="view-servicios" class="view">
         <header class="view-header">
-          <div><h1>Servicios</h1><p class="sub">Facturas de luz (EPEC) de cada propiedad. Las vencidas se pueden avisar por WhatsApp al inquilino con contrato activo. Gas y agua se suman más adelante.</p></div>
+          <div><h1>Servicios</h1><p class="sub">Facturas de luz (EPEC) y gas (Emprendimientos 2001) de cada propiedad. Las vencidas se pueden avisar por WhatsApp al inquilino con contrato activo. El agua se suma más adelante.</p></div>
         </header>
         <div id="servicios-panel"></div>
         <div class="toolbar">
@@ -190,6 +190,8 @@
             <option value="todos">Todos</option>
             <option value="vencidos">Con facturas vencidas</option>
             <option value="sinvincular">Sin vincular a un inmueble</option>
+            <option value="luz">Solo luz</option>
+            <option value="gas">Solo gas</option>
           </select>
         </div>
         <div class="table-wrap"><table class="data-table"><thead><tr><th>Propiedad</th><th>Inquilino</th><th>Facturas a pagar</th><th>Vencido</th><th></th></tr></thead><tbody id="tbl-servicios"></tbody></table></div>

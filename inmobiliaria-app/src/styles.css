@@ -516,3 +516,4 @@ small.muted { font-size: 12px; }
 .ci-aum { min-width: 240px; max-width: 320px; font-size: 12px; white-space: normal; }
 .ci-paso + .ci-paso { margin-top: 6px; }
 .ci-tabla td:last-child { min-width: 220px; max-width: 320px; white-space: normal; }
+.servicios-sep { border: 0; border-top: 1px solid var(--border); margin: 12px 0; }

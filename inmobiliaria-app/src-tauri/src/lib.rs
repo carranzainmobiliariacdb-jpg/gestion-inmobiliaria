@@ -20,7 +20,7 @@ pub fn run() {
         .plugin(tauri_plugin_process::init())
         .setup(|app| {
             app.manage(DbState(RwLock::new(None)));
-            app.manage(servicios::EpecState::default());
+            app.manage(servicios::ServiciosState::default());
             Ok(())
         })
         .invoke_handler(manejador())
@@ -101,10 +101,10 @@ pub fn manejador<R: tauri::Runtime>() -> impl Fn(tauri::ipc::Invoke<R>) -> bool 
         commands::crear_usuario,
         commands::eliminar_usuario,
         commands::iniciar_sesion,
-        servicios::epec_revisar,
-        servicios::epec_estado,
-        servicios::epec_mostrar,
-        servicios::epec_cerrar,
+        servicios::servicio_revisar,
+        servicios::servicio_estado,
+        servicios::servicio_mostrar,
+        servicios::servicio_cerrar,
         servicios::get_servicios_estado,
         servicios::guardar_servicios_estado,
         carga::importar_carga_inicial,

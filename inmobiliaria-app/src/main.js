@@ -617,19 +617,31 @@ async function avisoCumple(clave) {
   await enviarWhatsapp({ telefono: p?.telefono, nombre, tipo: "cumple", referencia: `${tipo}:${nombre}:${hoyIso().slice(0, 4)}`, mensaje: completarPlantilla(cfg("plantilla_cumple"), { ...datosBaseMensaje(), nombre: primerNombre(nombre) }) });
 }
 
-// ---------- SERVICIOS: luz (EPEC) ----------
+// ---------- SERVICIOS: luz (EPEC) y gas (Emprendimientos 2001) ----------
 //
-// La app abre una ventana propia con la Oficina Virtual de EPEC (la sesión
-// queda iniciada en esa ventana; la app no guarda la contraseña), recorre los
-// contratos adheridos y guarda en Supabase las facturas a pagar de cada uno.
-// Cada contrato de EPEC se vincula a un inmueble por el campo
-// «Luz (N° de contrato)»; el aviso va al inquilino con contrato activo ahí.
+// Para cada empresa la app abre una ventana propia con su página (la sesión
+// queda iniciada en esa ventana; la app no guarda la contraseña), recorre las
+// cuentas del usuario y guarda en Supabase las facturas a pagar de cada una.
+// Cada cuenta se vincula a un inmueble por el campo del servicio; el aviso va
+// al inquilino con contrato activo ahí.
 
+const FUENTES = {
+  luz: {
+    nombre: "Luz", empresa: "EPEC", icono: "⚡", campo: "servicio_luz_contrato", etiqueta: "contrato",
+    cfgUltima: "servicios_luz_ultima", cfgActivo: "epec_activo",
+    login: "Iniciá sesión en la ventana de EPEC (tildá «Recordar»). La revisión sigue sola después.",
+  },
+  gas: {
+    nombre: "Gas", empresa: "Emprendimientos 2001", icono: "🔥", campo: "servicio_gas", etiqueta: "cuenta",
+    cfgUltima: "servicios_gas_ultima", cfgActivo: "gas2001_activo",
+    login: "Iniciá sesión en la ventana de Emprendimientos 2001 (tildá «Recordarme en este equipo»). La revisión sigue sola después.",
+  },
+};
 const NOMBRE_SERVICIO = { luz: "luz", gas: "gas", agua: "agua" };
-let epecEstado = { estado: "inactivo" };
-let epecPoll = null;
+const estadosServicio = { luz: { estado: "inactivo" }, gas: { estado: "inactivo" } };
+const pollsServicio = {};
 
-/** "0013934301" y "13934301" son la misma cuenta. */
+/** "0013934301" y "13934301" son la misma cuenta; "3139 (Tomatis)" → "3139". */
 function normCuenta(v) {
   return String(v ?? "").replace(/\D/g, "").replace(/^0+/, "");
 }
@@ -648,8 +660,8 @@ function periodoMmAaaa(txt) {
 
 function inmueblePorCuenta(servicio, cuenta) {
   const n = normCuenta(cuenta);
-  if (!n) return null;
-  const campo = { luz: "servicio_luz_contrato", gas: "servicio_gas", agua: "servicio_agua" }[servicio];
+  const campo = FUENTES[servicio]?.campo || { agua: "servicio_agua" }[servicio];
+  if (!n || !campo) return null;
   return state.inmuebles.find((i) => normCuenta(i[campo]) === n) || null;
 }
 
@@ -666,6 +678,7 @@ function avisosServicios() {
   for (const f of state.servicios || []) {
     const venc = docsVencidos(f, hoy);
     if (!venc.length) continue;
+    const fu = FUENTES[f.servicio] || { icono: "", empresa: f.servicio, etiqueta: "cuenta" };
     const inm = inmueblePorCuenta(f.servicio, f.cuenta);
     const c = inm ? contratoActivoDe(inm.id) : null;
     const total = venc.reduce((a, d) => a + Number(d.importe || 0), 0);
@@ -690,49 +703,51 @@ function avisosServicios() {
       telefono: c?.inquilino_telefono,
       nombre: c?.inquilino_nombre || (inm ? "Sin inquilino activo" : "Sin vincular"),
       motivo: !inm ? "Vincular a un inmueble" : !c ? "Sin contrato activo" : "",
-      detalle: `${inm ? codHtml(inm.codigo) : ""}${esc(lugar)}<span class="sub-line">⚡ Luz EPEC · contrato ${esc(f.cuenta)} · ${esc(periodosTexto(periodos))} · <b>${money(total)}</b>${primerVenc ? ` · venció ${fmtDate(primerVenc)}` : ""}</span>`,
+      detalle: `${inm ? codHtml(inm.codigo) : ""}${esc(lugar)}<span class="sub-line">${fu.icono} ${esc(fu.nombre || "")} ${esc(fu.empresa)} · ${fu.etiqueta} ${esc(f.cuenta)} · ${esc(periodosTexto(periodos))} · <b>${money(total)}</b>${primerVenc ? ` · venció ${fmtDate(primerVenc)}` : ""}</span>`,
       mensaje: completarPlantilla(cfg("plantilla_servicio"), datos),
     });
   }
   return out;
 }
 
-function textoEstadoEpec() {
-  const e = epecEstado || {};
+function textoEstadoServicio(servicio) {
+  const e = estadosServicio[servicio] || {};
+  const emp = FUENTES[servicio].empresa;
   switch (e.estado) {
     case "abriendo":
-      return "Abriendo la Oficina Virtual de EPEC…";
+      return `Abriendo la página de ${emp}…`;
     case "login":
-      return "Iniciá sesión en la ventana de EPEC (tildá «Recordar»). La revisión sigue sola después.";
+      return FUENTES[servicio].login;
     case "revisando":
-      return e.total ? `Revisando contratos de EPEC… ${e.hechos} de ${e.total}` : "Revisando contratos de EPEC…";
+      return e.total ? `Revisando cuentas de ${emp}… ${e.hechos} de ${e.total}` : `Revisando cuentas de ${emp}…`;
     case "esperando":
-      return "Esperando en la ventana de EPEC…";
+      return `Esperando en la ventana de ${emp}…`;
     case "error":
-      return `No se pudo revisar EPEC: ${e.mensaje || "error"}`;
+      return `No se pudo revisar ${emp}: ${e.mensaje || "error"}`;
     default:
       return "";
   }
 }
 
 function panelServiciosHtml() {
-  const luz = (state.servicios || []).filter((f) => f.servicio === "luz");
-  const ultima = cfg("servicios_luz_ultima");
-  const sinVincular = luz.filter((f) => !inmueblePorCuenta("luz", f.cuenta)).length;
-  const corriendo = !!epecPoll;
-  return `<div class="panel servicios-panel">
-    <div class="servicios-panel-fila">
-      <div><b>⚡ Luz — EPEC</b>
-        <span class="sub-line">${luz.length ? `${luz.length} contratos · última revisión ${esc(ultima || "—")}${sinVincular ? ` · <b>${sinVincular} sin vincular a un inmueble</b>` : ""}` : "Todavía no se revisó. La primera vez hay que iniciar sesión en EPEC."}</span>
-        <span class="sub-line" id="epec-estado-texto">${esc(textoEstadoEpec())}</span>
+  const bloques = Object.entries(FUENTES).map(([s, fu]) => {
+    const filas = (state.servicios || []).filter((f) => f.servicio === s);
+    const ultima = cfg(fu.cfgUltima);
+    const sinVincular = filas.filter((f) => !inmueblePorCuenta(s, f.cuenta)).length;
+    const corriendo = !!pollsServicio[s];
+    return `<div class="servicios-panel-fila">
+      <div><b>${fu.icono} ${fu.nombre} — ${esc(fu.empresa)}</b>
+        <span class="sub-line">${filas.length ? `${filas.length} cuentas · última revisión ${esc(ultima || "—")}${sinVincular ? ` · <b>${sinVincular} sin vincular a un inmueble</b>` : ""}` : `Todavía no se revisó. La primera vez hay que iniciar sesión en ${esc(fu.empresa)}.`}</span>
+        <span class="sub-line" id="srv-estado-${s}">${esc(textoEstadoServicio(s))}</span>
       </div>
       <div class="header-actions">
-        ${luz.length ? `<button class="btn-secondary btn-sm" id="btn-epec-vincular">Vincular contratos</button>` : ""}
-        ${corriendo ? `<button class="btn-secondary btn-sm" id="btn-epec-ver">Ver ventana de EPEC</button>` : ""}
-        <button class="btn-primary btn-sm" id="btn-epec-revisar" ${corriendo ? "disabled" : ""}>${corriendo ? "Revisando…" : "Revisar EPEC ahora"}</button>
+        ${filas.length ? `<button class="btn-secondary btn-sm" data-srv-vincular="${s}">Vincular cuentas</button>` : ""}
+        ${corriendo ? `<button class="btn-secondary btn-sm" data-srv-ver="${s}">Ver ventana</button>` : ""}
+        <button class="btn-primary btn-sm" data-srv-revisar="${s}" ${corriendo ? "disabled" : ""}>${corriendo ? "Revisando…" : `Revisar ${esc(fu.empresa)}`}</button>
       </div>
-    </div>
-  </div>`;
+    </div>`;
+  });
+  return `<div class="panel servicios-panel">${bloques.join('<hr class="servicios-sep" />')}</div>`;
 }
 
 function refrescarPanelServicios() {
@@ -756,7 +771,7 @@ function renderServicios() {
   }
   serviciosAvisos = avisos;
   const filas = (state.servicios || [])
-    .filter((f) => f.servicio === "luz")
+    .filter((f) => FUENTES[f.servicio])
     .map((f) => {
       const inm = inmueblePorCuenta(f.servicio, f.cuenta);
       const c = inm ? contratoActivoDe(inm.id) : null;
@@ -767,8 +782,10 @@ function renderServicios() {
     })
     .filter((x) => filtro !== "vencidos" || x.venc.length)
     .filter((x) => filtro !== "sinvincular" || !x.inm)
+    .filter((x) => !["luz", "gas"].includes(filtro) || x.f.servicio === filtro)
     .sort((a, b) => b.total - a.total || String(a.inm?.direccion || a.f.direccion).localeCompare(String(b.inm?.direccion || b.f.direccion)));
   const html = filas.map(({ f, inm, c, venc, total, ai }) => {
+    const fu = FUENTES[f.servicio];
     const docs = (f.documentos || [])
       .map((d) => {
         const v = venc.includes(d);
@@ -785,7 +802,7 @@ function renderServicios() {
     }
     const fila = `<tr>
       <td>${inm ? `${codHtml(inm.codigo)}${esc(inm.direccion)}` : `${esc(f.direccion || "")} <span class="pill pill-warning">sin vincular</span>`}
-        <span class="sub-line">⚡ EPEC contrato ${esc(f.cuenta)} · ${esc(f.referencia || f.titular || "")}</span></td>
+        <span class="sub-line">${fu.icono} ${esc(fu.empresa)} ${fu.etiqueta} ${esc(f.cuenta)} · ${esc(f.referencia || f.titular || "")}</span></td>
       <td>${c ? `${esc(c.inquilino_nombre)}<span class="sub-line">${esc(c.inquilino_telefono || "sin teléfono")}</span>` : `<span class="sub-line">${inm ? "Sin contrato activo" : "—"}</span>`}</td>
       <td>${docs || `<span class="sub-line">Nada a pagar</span>`}${f.error ? `<span class="sub-line">⚠ ${esc(f.error)}</span>` : ""}</td>
       <td>${venc.length ? `<span class="pill pill-danger">${money(total)}</span>` : `<span class="pill pill-ok">Al día</span>`}</td>
@@ -795,7 +812,7 @@ function renderServicios() {
   const visibles = html.filter(Boolean);
   $("tbl-servicios").innerHTML = visibles.length
     ? visibles.join("")
-    : vacio(5, (state.servicios || []).length ? "No hay servicios con ese filtro" : "Todavía no se revisó EPEC. Tocá «Revisar EPEC ahora».");
+    : vacio(5, (state.servicios || []).length ? "No hay servicios con ese filtro" : "Todavía no se revisó ninguna empresa. Usá los botones de arriba.");
 }
 
 $("servicios-filtro").addEventListener("change", renderServicios);
@@ -807,78 +824,83 @@ document.addEventListener("click", async (e) => {
   if (a && (await enviarWhatsapp(a))) renderServicios();
 });
 
-async function revisarEpec({ visible = false } = {}) {
-  if (epecPoll) return toast("La revisión de EPEC ya está en curso");
-  await call("epec_revisar", { visible });
-  epecEstado = { estado: "abriendo" };
+async function revisarServicio(servicio, { visible = false } = {}) {
+  const fu = FUENTES[servicio];
+  if (pollsServicio[servicio]) return toast(`La revisión de ${fu.empresa} ya está en curso`);
+  await call("servicio_revisar", { servicio, visible });
+  estadosServicio[servicio] = { estado: "abriendo" };
   let mostrada = visible;
   let ultimoCambio = Date.now();
   let firma = "";
   const mostrar = () => {
     if (mostrada) return;
     mostrada = true;
-    invoke("epec_mostrar").catch(console.error);
+    invoke("servicio_mostrar", { servicio }).catch(console.error);
   };
   const terminar = () => {
-    clearInterval(epecPoll);
-    epecPoll = null;
+    clearInterval(pollsServicio[servicio]);
+    delete pollsServicio[servicio];
   };
-  epecPoll = setInterval(async () => {
+  pollsServicio[servicio] = setInterval(async () => {
     let e;
     try {
-      e = await invoke("epec_estado");
+      e = await invoke("servicio_estado", { servicio });
     } catch {
       return;
     }
-    epecEstado = e;
+    estadosServicio[servicio] = e;
     const f = `${e.estado}:${e.hechos ?? ""}:${e.ruta ?? ""}`;
     if (f !== firma) {
       firma = f;
       ultimoCambio = Date.now();
     }
     if (e.estado === "login") mostrar();
-    // Si en 45 s no avanza nada (página distinta, aviso de EPEC, etc.), se muestra la ventana.
+    // Si en 45 s no avanza nada (otra página, un aviso de la empresa, etc.), se muestra la ventana.
     if (e.estado !== "fin" && Date.now() - ultimoCambio > 45000) mostrar();
     if (e.estado === "fin") {
       terminar();
-      invoke("epec_cerrar").catch(console.error);
+      invoke("servicio_cerrar", { servicio }).catch(console.error);
       try {
-        await call("guardar_servicios_estado", { servicio: "luz", filas: e.contratos || [] });
+        await call("guardar_servicios_estado", { servicio, filas: e.contratos || [] });
         const ahora = new Date();
         const marca = `${hoyIso()} ${String(ahora.getHours()).padStart(2, "0")}:${String(ahora.getMinutes()).padStart(2, "0")}`;
-        await call("guardar_configuracion", { valores: { servicios_luz_ultima: marca, epec_activo: "1" } });
-        state.config.servicios_luz_ultima = marca;
-        state.config.epec_activo = "1";
+        await call("guardar_configuracion", { valores: { [fu.cfgUltima]: marca, [fu.cfgActivo]: "1" } });
+        state.config[fu.cfgUltima] = marca;
+        state.config[fu.cfgActivo] = "1";
         state.servicios = await call("get_servicios_estado");
         const conDeuda = (e.contratos || []).filter((x) => docsVencidos(x).length).length;
-        toast(`EPEC revisado: ${(e.contratos || []).length} contratos, ${conDeuda} con facturas vencidas`);
+        toast(`${fu.empresa} revisado: ${(e.contratos || []).length} cuentas, ${conDeuda} con facturas vencidas`);
       } catch (err) {
         console.error(err);
       }
-      epecEstado = { estado: "inactivo" };
+      estadosServicio[servicio] = { estado: "inactivo" };
       actualizarBadges();
     } else if (e.estado === "error") {
       terminar();
       mostrar();
-      toast(textoEstadoEpec(), true);
+      toast(textoEstadoServicio(servicio), true);
     } else if (!e.ventana_abierta && e.estado !== "abriendo") {
       terminar();
-      epecEstado = { estado: "inactivo" };
-      toast("Se cerró la ventana de EPEC antes de terminar la revisión", true);
+      estadosServicio[servicio] = { estado: "inactivo" };
+      toast(`Se cerró la ventana de ${fu.empresa} antes de terminar la revisión`, true);
     }
-    const t = $("epec-estado-texto");
-    if (t) t.textContent = textoEstadoEpec();
-    if (!epecPoll) refrescarPanelServicios();
+    const t = $(`srv-estado-${servicio}`);
+    if (t) t.textContent = textoEstadoServicio(servicio);
+    if (!pollsServicio[servicio]) refrescarPanelServicios();
   }, 1000);
   refrescarPanelServicios();
 }
 
-/** Una vez por día, al entrar, si EPEC ya se usó alguna vez (sesión iniciada). */
+/** Una vez por día, al entrar, para cada empresa que ya se usó (sesión iniciada). */
 function revisionAutomaticaServicios() {
-  if (cfg("epec_activo") !== "1") return;
-  const ultima = cfg("servicios_luz_ultima");
-  if (ultima && ultima.slice(0, 10) === hoyIso()) return;
-  setTimeout(() => revisarEpec({ visible: false }).catch(console.error), 8000);
+  let demora = 8000;
+  for (const [s, fu] of Object.entries(FUENTES)) {
+    if (cfg(fu.cfgActivo) !== "1") continue;
+    const ultima = cfg(fu.cfgUltima);
+    if (ultima && ultima.slice(0, 10) === hoyIso()) continue;
+    setTimeout(() => revisarServicio(s, { visible: false }).catch(console.error), demora);
+    demora += 15000;
+  }
 }
 
 /** Clave para comparar direcciones: número de puerta + palabras de la calle. */
@@ -904,48 +926,49 @@ function sugerirInmueble(f) {
   return cands.length === 1 ? cands[0] : null;
 }
 
-function abrirVincularEpec() {
-  const luz = (state.servicios || []).filter((f) => f.servicio === "luz");
+function abrirVincularServicio(servicio) {
+  const fu = FUENTES[servicio];
+  const lista = (state.servicios || []).filter((f) => f.servicio === servicio);
   const inmOrden = [...state.inmuebles].sort((a, b) => String(a.direccion).localeCompare(String(b.direccion)));
-  const filas = luz.map((f, i) => {
-    const actual = inmueblePorCuenta("luz", f.cuenta);
+  const filas = lista.map((f, i) => {
+    const actual = inmueblePorCuenta(servicio, f.cuenta);
     const sug = actual ? null : sugerirInmueble(f);
     const elegido = actual || sug;
     const venc = docsVencidos(f);
     const deuda = venc.reduce((a, d) => a + Number(d.importe || 0), 0);
     const pend = (f.documentos || []).length - venc.length;
     return `<tr>
-      <td><b>${esc(f.cuenta)}</b><span class="sub-line">Cliente ${esc(f.cliente || "")}</span></td>
-      <td>${esc(f.direccion || "")}<span class="sub-line">${esc(f.referencia || "")} · ${esc(f.titular || "")}</span></td>
+      <td><b>${esc(f.cuenta)}</b>${f.cliente && f.cliente !== f.cuenta ? `<span class="sub-line">Cliente ${esc(f.cliente)}</span>` : ""}</td>
+      <td>${esc(f.direccion || "")}<span class="sub-line">${esc(f.referencia || "")}${f.titular ? " · " + esc(f.titular) : ""}</span></td>
       <td>${venc.length ? `<span class="pill pill-danger">${money(deuda)} vencido</span>` : `<span class="pill pill-ok">Al día</span>`}${pend > 0 ? `<span class="sub-line">${pend} por vencer</span>` : ""}${f.error ? `<span class="sub-line">⚠ ${esc(f.error)}</span>` : ""}</td>
       <td><select data-vinc="${i}">
         <option value="">— sin vincular —</option>
-        ${inmOrden.map((x) => `<option value="${x.id}" ${elegido && elegido.id === x.id ? "selected" : ""}>${x.codigo != null && x.codigo !== "" ? esc(x.codigo) + " · " : ""}${esc(x.direccion)}${sug && sug.id === x.id ? " (sugerido)" : ""}</option>`).join("")}
+        ${inmOrden.map((x) => `<option value="${x.id}" ${elegido && elegido.id === x.id ? "selected" : ""}>${x.codigo != null && x.codigo !== "" ? esc(x.codigo) + " · " : ""}${esc(x.direccion)}${x.piso_depto ? " " + esc(x.piso_depto) : ""}${sug && sug.id === x.id ? " (sugerido)" : ""}</option>`).join("")}
       </select></td></tr>`;
   });
   openModal({
-    title: "Contratos de luz (EPEC)",
+    title: `Cuentas de ${fu.nombre.toLowerCase()} (${fu.empresa})`,
     size: "xl",
     saveLabel: "Guardar vínculos",
-    html: `<p class="hint">Elegí a qué inmueble corresponde cada contrato de EPEC. Se completa «Luz (N° de contrato)» del inmueble y los avisos van al inquilino con contrato activo ahí. Los marcados «(sugerido)» se eligieron por la dirección: revisalos antes de guardar.</p>
-      <div class="table-wrap"><table class="data-table"><thead><tr><th>Contrato EPEC</th><th>Dirección / referencia</th><th>Estado</th><th>Inmueble</th></tr></thead><tbody>${filas.join("") || vacio(4, "Sin contratos")}</tbody></table></div>`,
+    html: `<p class="hint">Elegí a qué inmueble corresponde cada cuenta. Se completa el campo de ${fu.nombre.toLowerCase()} del inmueble y los avisos van al inquilino con contrato activo ahí. Los marcados «(sugerido)» se eligieron por la dirección: revisalos antes de guardar.</p>
+      <div class="table-wrap"><table class="data-table"><thead><tr><th>${fu.etiqueta === "contrato" ? "Contrato" : "Cuenta"}</th><th>Dirección / referencia</th><th>Estado</th><th>Inmueble</th></tr></thead><tbody>${filas.join("") || vacio(4, "Sin cuentas")}</tbody></table></div>`,
     onSave: async () => {
       const cambios = [];
       document.querySelectorAll("[data-vinc]").forEach((sel) => {
-        const f = luz[Number(sel.dataset.vinc)];
-        const actual = inmueblePorCuenta("luz", f.cuenta);
+        const f = lista[Number(sel.dataset.vinc)];
+        const actual = inmueblePorCuenta(servicio, f.cuenta);
         const nuevo = sel.value ? Number(sel.value) : null;
         if ((actual?.id ?? null) === nuevo) return;
-        if (actual) cambios.push({ id: actual.id, servicio_luz_contrato: null });
+        if (actual) cambios.push({ id: actual.id, [fu.campo]: null });
         if (nuevo) {
           const inm = byId(state.inmuebles, nuevo);
-          const c = { id: nuevo, servicio_luz_contrato: f.cuenta };
-          if (inm && !inm.servicio_luz && f.cliente) c.servicio_luz = f.cliente;
+          const c = { id: nuevo, [fu.campo]: f.cuenta };
+          if (servicio === "luz" && inm && !inm.servicio_luz && f.cliente) c.servicio_luz = f.cliente;
           cambios.push(c);
         }
       });
-      // Primero se desvinculan, después se vinculan (por si un inmueble cambia de contrato).
-      cambios.sort((a, b) => (a.servicio_luz_contrato === null ? 0 : 1) - (b.servicio_luz_contrato === null ? 0 : 1));
+      // Primero se desvinculan, después se vinculan (por si un inmueble cambia de cuenta).
+      cambios.sort((a, b) => (a[fu.campo] === null ? 0 : 1) - (b[fu.campo] === null ? 0 : 1));
       for (const c of cambios) await call("guardar_inmueble", { inmueble: c });
       toast(cambios.length ? "Vínculos guardados" : "Sin cambios");
       if (cambios.length) await loadAll();
@@ -957,9 +980,11 @@ function abrirVincularEpec() {
 document.addEventListener("click", (e) => {
   const b = e.target.closest("button");
   if (!b) return;
-  if (b.id === "btn-epec-revisar") revisarEpec({ visible: cfg("epec_activo") !== "1" }).catch(console.error);
-  if (b.id === "btn-epec-ver") invoke("epec_mostrar").catch((err) => toast(String(err), true));
-  if (b.id === "btn-epec-vincular") abrirVincularEpec();
+  const s = b.dataset.srvRevisar || b.dataset.srvVer || b.dataset.srvVincular;
+  if (!s || !FUENTES[s]) return;
+  if (b.dataset.srvRevisar) revisarServicio(s, { visible: cfg(FUENTES[s].cfgActivo) !== "1" }).catch(console.error);
+  if (b.dataset.srvVer) invoke("servicio_mostrar", { servicio: s }).catch((err) => toast(String(err), true));
+  if (b.dataset.srvVincular) abrirVincularServicio(s);
 });
 
 // ---------- AVISOS (vista) ----------
@@ -1053,7 +1078,7 @@ const TABS_AVISOS = [
   ["aumento", "Aumentos"],
   ["vencimiento", "Fin de contrato"],
   ["cumple", "Cumpleaños"],
-  ["servicios", "Servicios (luz)"],
+  ["servicios", "Servicios"],
   ["historial", "Historial de mensajes"],
 ];
 
@@ -1073,7 +1098,7 @@ function renderAvisos() {
     aumento: "Contratos con un aumento cargado recientemente o que rige en los próximos días. Cargá los aumentos desde «Aumentos IPC / ICL».",
     vencimiento: "Contratos que vencen en los próximos 60 días.",
     cumple: "Cumpleaños de hoy y mañana de propietarios, inquilinos y garantes.",
-    servicios: "Facturas de luz (EPEC) vencidas e impagas en las propiedades. El mensaje va al inquilino con contrato activo en esa propiedad.",
+    servicios: "Facturas de luz (EPEC) y gas (Emprendimientos 2001) vencidas e impagas en las propiedades. El mensaje va al inquilino con contrato activo en esa propiedad.",
   }[avisosTab];
   $("avisos-lista").innerHTML = `${avisosTab === "servicios" ? panelServiciosHtml() : ""}<p class="hint">${ayuda}</p>
     <div class="table-wrap"><table class="data-table"><thead><tr><th>Destinatario</th><th>Detalle</th><th>Mensaje</th><th></th></tr></thead><tbody>${
