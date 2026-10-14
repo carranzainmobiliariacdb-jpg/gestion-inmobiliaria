@@ -66,13 +66,21 @@ PCs que se conecten al mismo proyecto ven y cargan los mismos datos.
   de la PC (vinculada con el número de la inmobiliaria como dispositivo),
   mensaje libre a cualquier persona, mensaje a varios (inquilinos activos,
   propietarios, garantes) e historial de mensajes enviados.
+- **Servicios impagos (luz EPEC)**: la app abre su propia ventana de la
+  Oficina Virtual de EPEC (la sesión se inicia una vez ahí, con «Recordar»; la
+  app no guarda la contraseña), recorre los contratos adheridos y guarda las
+  facturas a pagar en `servicios_estado`. Cada contrato se vincula a un
+  inmueble («Luz (N° de contrato)») y las facturas vencidas aparecen en
+  Avisos → Servicios con WhatsApp al inquilino activo. Se revisa sola una vez
+  por día al entrar (`src-tauri/src/servicios.rs`, `epec_revisor.js`).
 - **Configuración** compartida entre PCs: datos de la inmobiliaria, logo y
   numeración del recibo, mensajes de WhatsApp, IPC manual.
 - **Login** con usuarios compartidos entre todas las PCs.
 
 ## Actualizar la base (una sola vez por versión)
 
-La v0.8.0 agrega el N° de contrato de luz (EPEC) en el inmueble
+La v0.9.0 agrega la tabla de deudas de servicios
+([`src/migracion-0.9.0.sql`](./src/migracion-0.9.0.sql)). La v0.8.0 agrega el N° de contrato de luz (EPEC) en el inmueble
 ([`src/migracion-0.8.0.sql`](./src/migracion-0.8.0.sql)). La v0.5.0 agrega los modelos y documentos generados
 ([`src/migracion-0.5.0.sql`](./src/migracion-0.5.0.sql)). La v0.4.0 agrega la tabla de fotos y la consulta al BCRA
 ([`src/migracion-0.4.0.sql`](./src/migracion-0.4.0.sql)); la app muestra

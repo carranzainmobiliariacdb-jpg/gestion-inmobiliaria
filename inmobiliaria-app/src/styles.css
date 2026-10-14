@@ -503,3 +503,9 @@ small.muted { font-size: 12px; }
 
 .wa-guia { margin-top: 16px; background: #eaf7ef; border: 1px solid #bfe6cd; border-radius: 10px; padding: 12px 14px; font-size: 13px; color: #1d5a37; }
 .wa-guia ol { margin: 8px 0 10px; padding-left: 20px; line-height: 1.6; }
+
+/* Servicios (luz / gas / agua) en Avisos */
+.servicios-panel { padding: 14px 16px; margin-bottom: 14px; }
+.servicios-panel-fila { display: flex; gap: 16px; align-items: center; justify-content: space-between; flex-wrap: wrap; }
+.servicios-panel-fila .sub-line:empty { display: none; }
+.servicios-panel .sub-line { display: block; font-size: 12px; color: var(--text-muted); margin-top: 2px; }

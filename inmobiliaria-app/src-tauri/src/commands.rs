@@ -97,7 +97,7 @@ struct FilaId {
     id: i64,
 }
 
-async fn obtener_cliente(state: &DbState) -> Result<Cliente, String> {
+pub(crate) async fn obtener_cliente(state: &DbState) -> Result<Cliente, String> {
     state
         .0
         .read()
@@ -1138,6 +1138,7 @@ pub async fn base_actualizada(state: State<'_, DbState>) -> Result<bool, String>
         ("modelos_contrato", "select=id&limit=1"),
         ("documentos_generados", "select=id&limit=1"),
         ("inmuebles", "select=servicio_luz_contrato&limit=1"),
+        ("servicios_estado", "select=id&limit=1"),
     ];
     for (tabla, q) in chequeos {
         if cliente.select::<Value>(tabla, q).await.is_err() {
@@ -1249,7 +1250,8 @@ pub fn abrir_enlace<R: tauri::Runtime>(app: tauri::AppHandle<R>, url: String) ->
         || url.starts_with("https://api.whatsapp.com/")
         || url.starts_with("whatsapp://")
         || url.starts_with("https://web.whatsapp.com/")
-        || url.starts_with("https://www.bcra.gob.ar/"))
+        || url.starts_with("https://www.bcra.gob.ar/")
+        || url.starts_with("https://www.epec.com.ar/"))
     {
         return Err("Enlace no permitido".to_string());
     }

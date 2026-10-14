@@ -330,6 +330,22 @@ CREATE TABLE IF NOT EXISTS documentos_generados (
 );
 CREATE INDEX IF NOT EXISTS documentos_generados_contrato ON documentos_generados(contrato_id);
 
+-- ---------- Servicios (v0.9.0) ----------
+CREATE TABLE IF NOT EXISTS servicios_estado (
+    id          BIGSERIAL PRIMARY KEY,
+    servicio    TEXT NOT NULL,          -- luz | gas | agua
+    cuenta      TEXT NOT NULL,          -- N° de contrato / cuenta en la empresa
+    cliente     TEXT,
+    titular     TEXT,
+    direccion   TEXT,
+    referencia  TEXT,
+    documentos  JSONB NOT NULL DEFAULT '[]'::jsonb,  -- facturas a pagar
+    financiados BIGINT NOT NULL DEFAULT 0,
+    error       TEXT,
+    actualizado TEXT,
+    UNIQUE (servicio, cuenta)
+);
+
 DO $$
 DECLARE t record;
 BEGIN

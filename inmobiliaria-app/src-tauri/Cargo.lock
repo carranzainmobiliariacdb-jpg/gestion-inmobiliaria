@@ -1876,10 +1876,11 @@ dependencies = [
 
 [[package]]
 name = "inmobiliaria-app"
-version = "0.8.0"
+version = "0.9.0"
 dependencies = [
  "bcrypt",
  "chrono",
+ "percent-encoding",
  "reqwest 0.12.28",
  "serde",
  "serde_json",
