@@ -54,10 +54,12 @@ fn recibir_reporte<R: tauri::Runtime>(app: &tauri::AppHandle<R>, fragmento: &str
 }
 
 /// Abre (o reabre) la ventana de EPEC y empieza a revisar.
+/// Tiene que ser `async`: en Windows, crear una ventana desde un comando
+/// sincrónico bloquea la app (limitación conocida de Tauri/WebView2).
 /// `visible=false` la abre oculta: se muestra sola si hace falta iniciar sesión
 /// (el frontend llama a `epec_mostrar`).
 #[tauri::command]
-pub fn epec_revisar<R: tauri::Runtime>(app: tauri::AppHandle<R>, estado: State<'_, EpecState>, visible: bool) -> Result<(), String> {
+pub async fn epec_revisar<R: tauri::Runtime>(app: tauri::AppHandle<R>, estado: State<'_, EpecState>, visible: bool) -> Result<(), String> {
     if let Ok(mut e) = estado.0.lock() {
         *e = json!({ "estado": "abriendo" });
     }
@@ -100,7 +102,7 @@ pub fn epec_estado<R: tauri::Runtime>(app: tauri::AppHandle<R>, estado: State<'_
 }
 
 #[tauri::command]
-pub fn epec_mostrar<R: tauri::Runtime>(app: tauri::AppHandle<R>) -> Result<(), String> {
+pub async fn epec_mostrar<R: tauri::Runtime>(app: tauri::AppHandle<R>) -> Result<(), String> {
     let v = app.get_webview_window(VENTANA_EPEC).ok_or("La ventana de EPEC no está abierta")?;
     v.show().map_err(map_err)?;
     let _ = v.unminimize();
@@ -108,7 +110,7 @@ pub fn epec_mostrar<R: tauri::Runtime>(app: tauri::AppHandle<R>) -> Result<(), S
 }
 
 #[tauri::command]
-pub fn epec_cerrar<R: tauri::Runtime>(app: tauri::AppHandle<R>) -> Result<(), String> {
+pub async fn epec_cerrar<R: tauri::Runtime>(app: tauri::AppHandle<R>) -> Result<(), String> {
     if let Some(v) = app.get_webview_window(VENTANA_EPEC) {
         v.close().map_err(map_err)?;
     }
