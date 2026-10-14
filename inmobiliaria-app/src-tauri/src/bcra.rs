@@ -6,12 +6,35 @@ const BASE: &str = "https://api.bcra.gob.ar/CentralDeDeudores/v1.0/Deudas";
 
 /// Resultado de un endpoint: Ok(Some(results)) con datos, Ok(None) si el BCRA
 /// no tiene registros para ese CUIT/CUIL (404), Err con el motivo si falló.
+/// Mensaje de error con la causa real (reqwest solo dice "error sending request").
+fn detalle_error(e: &reqwest::Error) -> String {
+    let mut s = e.to_string();
+    let mut fuente = std::error::Error::source(e);
+    while let Some(f) = fuente {
+        s.push_str(" → ");
+        s.push_str(&f.to_string());
+        fuente = f.source();
+    }
+    s
+}
+
 async fn pedir(client: &reqwest::Client, url: &str) -> Result<Option<Value>, String> {
-    let resp = client
-        .get(url)
-        .send()
-        .await
-        .map_err(|e| format!("No se pudo conectar con el BCRA. Verificá tu conexión. Detalle: {}", e))?;
+    // El BCRA a veces tarda o corta la primera conexión: se reintenta.
+    let mut ultimo_error = String::new();
+    let mut resp = None;
+    for intento in 0..3 {
+        if intento > 0 {
+            tokio::time::sleep(std::time::Duration::from_millis(1500)).await;
+        }
+        match client.get(url).send().await {
+            Ok(r) => {
+                resp = Some(r);
+                break;
+            }
+            Err(e) => ultimo_error = detalle_error(&e),
+        }
+    }
+    let resp = resp.ok_or_else(|| format!("No se pudo conectar con el BCRA. Detalle: {}", ultimo_error))?;
     let status = resp.status();
     let texto = resp.text().await.unwrap_or_default();
     if status.as_u16() == 404 {
@@ -52,7 +75,11 @@ pub async fn consultar(cuit: &str) -> Result<Value, String> {
     if id.len() != 11 {
         return Err("Para consultar al BCRA hace falta el CUIT/CUIL completo (11 números). Cargá el DNI y el sexo para calcularlo, o escribilo.".into());
     }
-    let client = crate::icl::cliente_http()?;
+    let client = reqwest::Client::builder()
+        .timeout(std::time::Duration::from_secs(30))
+        .user_agent("Mozilla/5.0 (Windows NT 10.0; Win64; x64) GestionInmobiliaria/1.0")
+        .build()
+        .map_err(|e| format!("No se pudo inicializar el cliente HTTP: {}", e))?;
     let deudas = pedir(&client, &format!("{}/{}", BASE, id)).await?;
     let historicas = pedir(&client, &format!("{}/Historicas/{}", BASE, id)).await.unwrap_or(None);
     let cheques = pedir(&client, &format!("{}/ChequesRechazados/{}", BASE, id)).await.unwrap_or(None);

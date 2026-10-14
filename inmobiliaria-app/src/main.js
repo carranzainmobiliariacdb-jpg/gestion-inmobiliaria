@@ -1414,7 +1414,19 @@ function abrirPersona(tabla, id = null, valoresIniciales = {}) {
             if (!$("f-cuit_cuil").value) $("f-cuit_cuil").value = `${cuit.slice(0, 2)}-${cuit.slice(2, 10)}-${cuit.slice(10)}`;
             $("bcra-resultado").innerHTML = '<span class="muted">Consultando al BCRA…</span>';
             try {
-              const r = await invoke("consultar_bcra", { cuit, tabla: id ? tabla : null, id });
+              let r;
+              try {
+                r = await invoke("consultar_bcra", { cuit, tabla: id ? tabla : null, id });
+              } catch (errDirecto) {
+                // Respaldo: consultar desde la ventana de la app (usa la conexión del navegador de Windows).
+                $("bcra-resultado").innerHTML = '<span class="muted">Reintentando la consulta por otra vía…</span>';
+                try {
+                  r = await consultarBcraWeb(cuit);
+                } catch (errWeb) {
+                  throw `${typeof errDirecto === "string" ? errDirecto : "No se pudo consultar"} · Segundo intento: ${errWeb?.message || errWeb}. Probá con «Ver en la web del BCRA».`;
+                }
+                if (id) await invoke("guardar_bcra", { tabla, id, resultado: r }).catch(console.error);
+              }
               bcraNuevo = r;
               $("bcra-resultado").innerHTML = htmlBcra(r, hoyIso());
               if (id) {
@@ -3468,4 +3480,35 @@ function abrirCargaInicial(datos) {
       return false; // queda abierto el resumen
     },
   });
+}
+
+// ---------- BCRA desde la ventana de la app (respaldo) ----------
+
+/** Misma consulta que hace la app por Rust (bcra.rs), pero con fetch de la ventana. */
+async function consultarBcraWeb(cuit) {
+  const base = "https://api.bcra.gob.ar/CentralDeDeudores/v1.0/Deudas";
+  const pedir = async (url, obligatorio) => {
+    const ctrl = new AbortController();
+    const t = setTimeout(() => ctrl.abort(), 30000);
+    try {
+      const r = await fetch(url, { signal: ctrl.signal });
+      if (r.status === 404) return null;
+      const j = await r.json().catch(() => null);
+      if (!r.ok) throw new Error(j?.errorMessages?.[0] || `El BCRA respondió un error (${r.status})`);
+      return j?.results ?? null;
+    } catch (e) {
+      if (obligatorio) throw e;
+      return null;
+    } finally {
+      clearTimeout(t);
+    }
+  };
+  const deudas = await pedir(`${base}/${cuit}`, true);
+  const historicas = await pedir(`${base}/Historicas/${cuit}`, false);
+  const cheques = await pedir(`${base}/ChequesRechazados/${cuit}`, false);
+  const sit = (ents) => Math.max(0, ...(ents || []).map((e) => Number(e.situacion) || 0));
+  const situacion = sit(deudas?.periodos?.[0]?.entidades);
+  const peor_historica = Math.max(0, ...(historicas?.periodos || []).map((p) => sit(p.entidades)));
+  const cantidad_cheques = (cheques?.causales || []).flatMap((c) => c.entidades || []).reduce((a, e) => a + (e.detalle?.length || 0), 0);
+  return { cuit, situacion, peor_historica, cantidad_cheques, deudas, historicas, cheques };
 }

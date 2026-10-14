@@ -941,6 +941,22 @@ pub async fn consultar_bcra(state: State<'_, DbState>, cuit: String, tabla: Opti
     Ok(resultado)
 }
 
+/// Guarda una consulta al BCRA hecha desde la ventana de la app (respaldo
+/// cuando la conexión directa falla).
+#[tauri::command]
+pub async fn guardar_bcra(state: State<'_, DbState>, tabla: String, id: i64, resultado: Value) -> Result<(), String> {
+    if !["inquilinos", "garantes"].contains(&tabla.as_str()) {
+        return Err("Tabla no permitida".into());
+    }
+    let cliente = obtener_cliente(&state).await?;
+    let body = json!({
+        "bcra_situacion": resultado["situacion"],
+        "bcra_fecha": today().format("%Y-%m-%d").to_string(),
+        "bcra_detalle": resultado,
+    });
+    cliente.update(&tabla, &format!("id=eq.{}", id), &body).await.map_err(map_err)
+}
+
 // ---------- Fotos del estado de los inmuebles ----------
 
 /// Lista de fotos de un inmueble, solo con la miniatura (la foto grande se

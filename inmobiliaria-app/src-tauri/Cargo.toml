@@ -1,6 +1,6 @@
 [package]
 name = "inmobiliaria-app"
-version = "0.10.0"
+version = "0.10.1"
 description = "Inmobiliaria App - Gestion de alquileres"
 authors = ["you"]
 edition = "2021"
@@ -28,7 +28,7 @@ chrono = { version = "0.4", features = ["serde"] }
 reqwest = { version = "0.12", features = ["json"] }
 bcrypt = "0.15"
 percent-encoding = "2"
-tokio = { version = "1", features = ["sync"] }
+tokio = { version = "1", features = ["sync", "time"] }
 
 [dev-dependencies]
 tokio = { version = "1", features = ["sync", "macros", "rt-multi-thread"] }

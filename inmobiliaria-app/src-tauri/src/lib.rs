@@ -74,6 +74,7 @@ pub fn manejador<R: tauri::Runtime>() -> impl Fn(tauri::ipc::Invoke<R>) -> bool 
         commands::confirmar_actualizacion_icl,
         commands::base_actualizada,
         commands::consultar_bcra,
+        commands::guardar_bcra,
         commands::get_modelos,
         commands::guardar_modelo,
         commands::eliminar_modelo,
