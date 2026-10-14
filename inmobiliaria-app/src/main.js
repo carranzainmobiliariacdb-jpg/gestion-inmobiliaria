@@ -636,14 +636,20 @@ const FUENTES = {
     cfgUltima: "servicios_gas_ultima", cfgActivo: "gas2001_activo",
     login: "Iniciá sesión en la ventana de Emprendimientos 2001 (tildá «Recordarme en este equipo»). La revisión sigue sola después.",
   },
+  agua: {
+    nombre: "Agua", empresa: "Municipalidad", icono: "💧", campo: "servicio_agua", etiqueta: "cuenta",
+    cfgUltima: "servicios_agua_ultima", cfgActivo: "agua_muni_activo", manual: true,
+    login: "En la ventana de la Municipalidad hacé la verificación y tocá «Aceptar». La app lee la deuda sola.",
+  },
 };
 const NOMBRE_SERVICIO = { luz: "luz", gas: "gas", agua: "agua" };
-const estadosServicio = { luz: { estado: "inactivo" }, gas: { estado: "inactivo" } };
+const estadosServicio = { luz: { estado: "inactivo" }, gas: { estado: "inactivo" }, agua: { estado: "inactivo" } };
 const pollsServicio = {};
 
 /** "0013934301" y "13934301" son la misma cuenta; "3139 (Tomatis)" → "3139". */
 function normCuenta(v) {
-  return String(v ?? "").replace(/\D/g, "").replace(/^0+/, "");
+  // Solo el primer número: "30382 (compartido con Dorrego 806)" → "30382".
+  return ((String(v ?? "").match(/\d+/) || [""])[0]).replace(/^0+/, "");
 }
 
 /** "01/10/2026" → "2026-10-01". */
@@ -655,12 +661,14 @@ function fechaDmyAIso(txt) {
 /** "09/2026" → "2026-09" (para periodoTitulo). */
 function periodoMmAaaa(txt) {
   const m = String(txt || "").match(/^(\d{1,2})\/(\d{4})$/);
-  return m ? `${m[2]}-${m[1].padStart(2, "0")}` : txt;
+  if (m) return `${m[2]}-${m[1].padStart(2, "0")}`;
+  const m2 = String(txt || "").match(/^(\d{4})\/0*(\d{1,2})$/); // "2026/006" (Municipalidad)
+  return m2 ? `${m2[1]}-${m2[2].padStart(2, "0")}` : txt;
 }
 
 function inmueblePorCuenta(servicio, cuenta) {
   const n = normCuenta(cuenta);
-  const campo = FUENTES[servicio]?.campo || { agua: "servicio_agua" }[servicio];
+  const campo = FUENTES[servicio]?.campo;
   if (!n || !campo) return null;
   return state.inmuebles.find((i) => normCuenta(i[campo]) === n) || null;
 }
@@ -735,6 +743,16 @@ function panelServiciosHtml() {
     const ultima = cfg(fu.cfgUltima);
     const sinVincular = filas.filter((f) => !inmueblePorCuenta(s, f.cuenta)).length;
     const corriendo = !!pollsServicio[s];
+    if (fu.manual) {
+      const conCuenta = new Set(state.inmuebles.map((i) => normCuenta(i[fu.campo])).filter(Boolean)).size;
+      return `<div class="servicios-panel-fila">
+      <div><b>${fu.icono} ${fu.nombre} — ${esc(fu.empresa)}</b>
+        <span class="sub-line">Se consulta cuenta por cuenta: la Municipalidad pide una verificación en cada consulta. ${conCuenta} cuentas cargadas en inmuebles${filas.length ? ` · ${filas.length} consultadas` : ""}.</span>
+        <span class="sub-line" id="srv-estado-${s}">${esc(textoEstadoServicio(s))}</span>
+      </div>
+      <div class="header-actions"><button class="btn-primary btn-sm" data-srv-agua="1">Consultar agua…</button></div>
+    </div>`;
+    }
     return `<div class="servicios-panel-fila">
       <div><b>${fu.icono} ${fu.nombre} — ${esc(fu.empresa)}</b>
         <span class="sub-line">${filas.length ? `${filas.length} cuentas · última revisión ${esc(ultima || "—")}${sinVincular ? ` · <b>${sinVincular} sin vincular a un inmueble</b>` : ""}` : `Todavía no se revisó. La primera vez hay que iniciar sesión en ${esc(fu.empresa)}.`}</span>
@@ -782,7 +800,7 @@ function renderServicios() {
     })
     .filter((x) => filtro !== "vencidos" || x.venc.length)
     .filter((x) => filtro !== "sinvincular" || !x.inm)
-    .filter((x) => !["luz", "gas"].includes(filtro) || x.f.servicio === filtro)
+    .filter((x) => !["luz", "gas", "agua"].includes(filtro) || x.f.servicio === filtro)
     .sort((a, b) => b.total - a.total || String(a.inm?.direccion || a.f.direccion).localeCompare(String(b.inm?.direccion || b.f.direccion)));
   const html = filas.map(({ f, inm, c, venc, total, ai }) => {
     const fu = FUENTES[f.servicio];
@@ -824,10 +842,14 @@ document.addEventListener("click", async (e) => {
   if (a && (await enviarWhatsapp(a))) renderServicios();
 });
 
-async function revisarServicio(servicio, { visible = false } = {}) {
+async function revisarServicio(servicio, { visible = false, cuenta = null } = {}) {
   const fu = FUENTES[servicio];
-  if (pollsServicio[servicio]) return toast(`La revisión de ${fu.empresa} ya está en curso`);
-  await call("servicio_revisar", { servicio, visible });
+  if (pollsServicio[servicio] && !cuenta) return toast(`La revisión de ${fu.empresa} ya está en curso`);
+  if (pollsServicio[servicio]) {
+    clearInterval(pollsServicio[servicio]);
+    delete pollsServicio[servicio];
+  }
+  await call("servicio_revisar", { servicio, visible, cuenta });
   estadosServicio[servicio] = { estado: "abriendo" };
   let mostrada = visible;
   let ultimoCambio = Date.now();
@@ -895,7 +917,7 @@ async function revisarServicio(servicio, { visible = false } = {}) {
 function revisionAutomaticaServicios() {
   let demora = 8000;
   for (const [s, fu] of Object.entries(FUENTES)) {
-    if (cfg(fu.cfgActivo) !== "1") continue;
+    if (fu.manual || cfg(fu.cfgActivo) !== "1") continue;
     const ultima = cfg(fu.cfgUltima);
     if (ultima && ultima.slice(0, 10) === hoyIso()) continue;
     setTimeout(() => revisarServicio(s, { visible: false }).catch(console.error), demora);
@@ -985,6 +1007,49 @@ document.addEventListener("click", (e) => {
   if (b.dataset.srvRevisar) revisarServicio(s, { visible: cfg(FUENTES[s].cfgActivo) !== "1" }).catch(console.error);
   if (b.dataset.srvVer) invoke("servicio_mostrar", { servicio: s }).catch((err) => toast(String(err), true));
   if (b.dataset.srvVincular) abrirVincularServicio(s);
+});
+
+// ---------- Agua (Municipalidad): consulta cuenta por cuenta ----------
+
+function abrirConsultaAgua() {
+  const porCuenta = new Map();
+  for (const i of [...state.inmuebles].sort((a, b) => String(a.direccion).localeCompare(String(b.direccion)))) {
+    const n = normCuenta(i.servicio_agua);
+    if (!n) continue;
+    if (!porCuenta.has(n)) porCuenta.set(n, []);
+    porCuenta.get(n).push(i);
+  }
+  const filas = [...porCuenta.entries()].map(([n, inms]) => {
+    const f = (state.servicios || []).find((x) => x.servicio === "agua" && normCuenta(x.cuenta) === n);
+    const venc = f ? docsVencidos(f) : [];
+    const deuda = venc.reduce((a, d) => a + Number(d.importe || 0), 0);
+    const estado = !f ? '<span class="muted">Sin consultar</span>' : venc.length ? `<span class="pill pill-danger">${money(deuda)} vencido</span>` : '<span class="pill pill-ok">Al día</span>';
+    return `<tr><td><b>${esc(n)}</b></td><td>${inms.map((i) => `${codHtml(i.codigo)}${esc(i.direccion)}${i.piso_depto ? " " + esc(i.piso_depto) : ""}`).join("<br/>")}</td>
+      <td>${estado}${f?.actualizado ? `<span class="sub-line">Consultado ${esc(f.actualizado)}</span>` : ""}</td>
+      <td class="actions"><button class="btn-secondary btn-sm" data-agua-cuenta="${esc(n)}">Consultar</button></td></tr>`;
+  });
+  openModal({
+    title: "Agua — Municipalidad",
+    size: "wide",
+    sinGuardar: true,
+    html: `<div id="agua-cuerpo"><p class="hint">Al tocar «Consultar» se abre la página de la Municipalidad con la cuenta ya escrita. Hacé la verificación de Cloudflare y tocá «Aceptar»: la app lee la deuda, la guarda y la ventana se cierra sola.</p>
+      <div class="toolbar"><input class="search" id="agua-otra" placeholder="Otra cuenta (N°)" style="max-width:200px" /><button class="btn-secondary btn-sm" id="agua-otra-btn">Consultar</button></div>
+      <div class="table-wrap"><table class="data-table"><thead><tr><th>Cuenta</th><th>Inmueble(s)</th><th>Estado</th><th></th></tr></thead><tbody>${filas.join("") || vacio(4, "Ningún inmueble tiene cargado el N° de cuenta de agua (campo «Agua» del inmueble).")}</tbody></table></div></div>`,
+    onMount: () => {
+      $("agua-cuerpo").addEventListener("click", (e) => {
+        const b = e.target.closest("[data-agua-cuenta], #agua-otra-btn");
+        if (!b) return;
+        const cuenta = b.id === "agua-otra-btn" ? $("agua-otra").value : b.dataset.aguaCuenta;
+        if (!normCuenta(cuenta)) return toast("Escribí el N° de cuenta", true);
+        closeModal();
+        revisarServicio("agua", { visible: true, cuenta: normCuenta(cuenta) }).catch(console.error);
+      });
+    },
+  });
+}
+
+document.addEventListener("click", (e) => {
+  if (e.target.closest("[data-srv-agua]")) abrirConsultaAgua();
 });
 
 // ---------- AVISOS (vista) ----------
@@ -1098,7 +1163,7 @@ function renderAvisos() {
     aumento: "Contratos con un aumento cargado recientemente o que rige en los próximos días. Cargá los aumentos desde «Aumentos IPC / ICL».",
     vencimiento: "Contratos que vencen en los próximos 60 días.",
     cumple: "Cumpleaños de hoy y mañana de propietarios, inquilinos y garantes.",
-    servicios: "Facturas de luz (EPEC) y gas (Emprendimientos 2001) vencidas e impagas en las propiedades. El mensaje va al inquilino con contrato activo en esa propiedad.",
+    servicios: "Facturas de luz (EPEC), gas (Emprendimientos 2001) y agua (Municipalidad) vencidas e impagas en las propiedades. El mensaje va al inquilino con contrato activo en esa propiedad.",
   }[avisosTab];
   $("avisos-lista").innerHTML = `${avisosTab === "servicios" ? panelServiciosHtml() : ""}<p class="hint">${ayuda}</p>
     <div class="table-wrap"><table class="data-table"><thead><tr><th>Destinatario</th><th>Detalle</th><th>Mensaje</th><th></th></tr></thead><tbody>${

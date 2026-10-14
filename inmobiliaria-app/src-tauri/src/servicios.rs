@@ -1,4 +1,6 @@
-//! Revisión de deudas de servicios (luz de EPEC, gas de Emprendimientos 2001).
+//! Revisión de deudas de servicios (luz de EPEC, gas de Emprendimientos 2001,
+//! agua de la Municipalidad — esta última cuenta por cuenta, con verificación
+//! de la persona).
 //!
 //! La app abre una ventana propia con la Oficina Virtual de EPEC. La primera
 //! vez la persona inicia sesión ahí (con "Recordar", la sesión dura años y la
@@ -38,6 +40,12 @@ fn fuente(servicio: &str) -> Result<Fuente, String> {
             url: "https://www.cooponlineweb.com.ar/EMPRENDIMIENTOS2001/Principal",
             script: include_str!("gas_revisor.js"),
             titulo: "Emprendimientos 2001 — Gas (Gestión Inmobiliaria)",
+        }),
+        "agua" => Ok(Fuente {
+            ventana: "agua_muni",
+            url: "https://www.municipalidad.com/cbus/deuda",
+            script: include_str!("agua_revisor.js"),
+            titulo: "Municipalidad — Agua (Gestión Inmobiliaria)",
         }),
         _ => Err(format!("Servicio no soportado: {}", servicio)),
     }
@@ -83,13 +91,19 @@ pub async fn servicio_revisar<R: tauri::Runtime>(
     estado: State<'_, ServiciosState>,
     servicio: String,
     visible: bool,
+    cuenta: Option<String>,
 ) -> Result<(), String> {
     let f = fuente(&servicio)?;
+    // Agua: se consulta una cuenta por vez; va en el "#" para que el script la escriba.
+    let url = match cuenta.as_deref().map(|c| c.chars().filter(|x| x.is_ascii_digit()).collect::<String>()) {
+        Some(c) if !c.is_empty() => format!("{}#cuenta={}", f.url, c),
+        _ => f.url.to_string(),
+    };
     if let Ok(mut m) = estado.0.lock() {
         m.insert(servicio.clone(), json!({ "estado": "abriendo" }));
     }
     if let Some(v) = app.get_webview_window(f.ventana) {
-        v.navigate(f.url.parse().map_err(map_err)?).map_err(map_err)?;
+        v.navigate(url.parse().map_err(map_err)?).map_err(map_err)?;
         if visible {
             let _ = v.show();
             let _ = v.set_focus();
@@ -98,7 +112,7 @@ pub async fn servicio_revisar<R: tauri::Runtime>(
     }
     let app2 = app.clone();
     let clave = servicio.clone();
-    WebviewWindowBuilder::new(&app, f.ventana, WebviewUrl::External(f.url.parse().map_err(map_err)?))
+    WebviewWindowBuilder::new(&app, f.ventana, WebviewUrl::External(url.parse().map_err(map_err)?))
         .title(f.titulo)
         .inner_size(1000.0, 760.0)
         .center()

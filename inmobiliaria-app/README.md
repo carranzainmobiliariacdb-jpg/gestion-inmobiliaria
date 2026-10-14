@@ -76,6 +76,10 @@ PCs que se conecten al mismo proyecto ven y cargan los mismos datos.
 - **Gas (Emprendimientos 2001)**: igual que la luz, con su propia ventana de
   CoopOnlineWeb (`gas_revisor.js`): recorre las cuentas agregadas al usuario y
   lee las facturas impagas. Cada cuenta se vincula al inmueble por «Gas».
+- **Agua (Municipalidad)**: la página pide una verificación de Cloudflare
+  en cada consulta, así que se consulta cuenta por cuenta: la app abre la
+  página con la cuenta escrita, la persona verifica y acepta, y
+  `agua_revisor.js` lee el listado de deuda y lo guarda.
 - **Carga inicial** (Contratos → «Importar carga inicial»): lee un JSON con
   propietarios, inquilinos, garantes, inmuebles, contratos, aumentos ya
   aplicados (ICL/IPC) y el mes cobrado; muestra todo para revisar y lo carga
