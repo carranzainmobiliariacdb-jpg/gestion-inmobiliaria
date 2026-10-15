@@ -391,6 +391,84 @@ async function enviarWhatsapp({ telefono, mensaje, contrato_id = null, tipo, ref
   return true;
 }
 
+// ---------- PDF (recibo / liquidación) adjunto por WhatsApp ----------
+
+/** Devuelve una data URI (base64) con el contenido de una URL local
+ *  — logos, estilos, lo que la app empaqueta junto al index.html. */
+async function fetchDataUri(url) {
+  const r = await fetch(url);
+  const b = await r.blob();
+  return await new Promise((ok, err) => {
+    const fr = new FileReader();
+    fr.onload = () => ok(fr.result);
+    fr.onerror = () => err(fr.error);
+    fr.readAsDataURL(b);
+  });
+}
+async function fetchTexto(url) {
+  const r = await fetch(url);
+  return await r.text();
+}
+
+let estilosPdfCache = null;
+let logoDefaultCache = null;
+
+/** Arma un HTML autocontenido (estilos y logo embebidos) listo para que
+ *  Edge headless lo convierta en PDF idéntico a la vista previa. */
+async function htmlAutocontenido(cuerpo, apaisado) {
+  if (!estilosPdfCache) estilosPdfCache = await fetchTexto("styles.css");
+  if (!logoDefaultCache) {
+    try {
+      logoDefaultCache = await fetchDataUri("logo-carranza.png");
+    } catch {
+      logoDefaultCache = "";
+    }
+  }
+  // El HTML interno puede referirse a "logo-carranza.png" cuando no hay
+  // logo personalizado cargado: lo reemplazamos por el data URI para que
+  // el PDF salga con el logo correcto aunque Edge corra fuera del app.
+  const html = logoDefaultCache ? cuerpo.replaceAll('src="logo-carranza.png"', `src="${logoDefaultCache}"`) : cuerpo;
+  const pageRule = `@page { size: A4 ${apaisado ? "landscape" : "portrait"}; margin: ${apaisado ? "8mm" : "10mm"}; }`;
+  return `<!DOCTYPE html><html lang="es"><head><meta charset="utf-8" />
+<title>${esc("documento")}</title>
+<style>${estilosPdfCache}
+${pageRule}
+body { background:#fff; margin:0; }
+.print-body { box-shadow:none; margin:0; width:auto; }
+</style></head><body><div class="print-body">${html}</div></body></html>`;
+}
+
+/** Genera el PDF del documento que está en la vista previa, lo copia al
+ *  portapapeles y abre el chat de WhatsApp con el mensaje. El usuario
+ *  después aprieta Ctrl+V en el chat para adjuntar el PDF. */
+async function enviarWhatsappConPdf({ htmlDoc, apaisado, nombrePdf, telefono, nombre, contrato_id = null, tipo, referencia = null, mensaje }) {
+  const tel = telefonoWhatsapp(telefono, cfg("wa_codigo_area"));
+  if (!tel) {
+    toast(`${nombre || "La persona"} no tiene un teléfono válido cargado`, true);
+    return false;
+  }
+  let ruta = null;
+  try {
+    const htmlCompleto = await htmlAutocontenido(htmlDoc, !!apaisado);
+    ruta = await call("generar_pdf", { html: htmlCompleto, nombre: nombrePdf });
+    await call("copiar_pdf_portapapeles", { ruta });
+  } catch (e) {
+    console.error("No se pudo generar / copiar el PDF:", e);
+    toast(`No se pudo generar el PDF (${String(e).slice(0, 120)}). Igual abro WhatsApp con el mensaje.`, true);
+  }
+  const limpio = mensaje.replace(/\n{3,}/g, "\n\n").replace(/\n+$/, "");
+  await call("abrir_enlace", { url: urlWhatsapp(tel, limpio) });
+  try {
+    const reg = { contrato_id, tipo, referencia, telefono: tel, mensaje: limpio, fecha: hoyIso(), usuario: usuarioNombre() };
+    await invoke("registrar_recordatorio", { recordatorio: reg });
+    state.recordatorios.unshift({ ...reg, id: Date.now() });
+  } catch (e) {
+    console.error(e);
+  }
+  if (ruta) toast("PDF listo en el portapapeles. En el chat de WhatsApp apretá Ctrl+V y Enter para adjuntarlo.");
+  return true;
+}
+
 function ultimoAviso(contratoId, tipo, referencia) {
   return state.recordatorios.find((r) => r.tipo === tipo && (contratoId == null || r.contrato_id === contratoId) && (referencia == null || r.referencia === referencia));
 }
@@ -2586,15 +2664,21 @@ function leerFormaPago() {
 async function verRecibo(pagoId) {
   const r = await call("get_recibo", { pagoId });
   const conf = configCompleta();
-  openPrint(htmlRecibo(r, conf), {
+  const htmlDoc = htmlRecibo(r, conf);
+  openPrint(htmlDoc, {
     titulo: `Recibo N° ${r.numero_recibo}`,
     apaisado: true,
     whatsapp: async () => {
       const inq = r.contratos?.inquilinos || {};
       const inm = r.contratos?.inmuebles || {};
       const datos = { ...datosBaseMensaje(), nombre: primerNombre(inq.nombre), monto: money(totalesRecibo(r).total), periodo: periodoTitulo(r.periodo).toLowerCase(), inmueble: inm.direccion, recibo: r.numero_recibo };
-      await enviarWhatsapp({ telefono: inq.telefono, nombre: inq.nombre, contrato_id: r.contrato_id, tipo: "recibo", referencia: String(r.numero_recibo), mensaje: completarPlantilla(cfg("plantilla_recibo"), datos) });
-      toast("Tip: guardá el recibo en PDF y adjuntalo en el chat que se abrió.");
+      const nombreArchivo = `Recibo_N${r.numero_recibo}_${(inq.nombre || "").split(" ").slice(0, 2).join("_")}`;
+      await enviarWhatsappConPdf({
+        htmlDoc, apaisado: true, nombrePdf: nombreArchivo,
+        telefono: inq.telefono, nombre: inq.nombre, contrato_id: r.contrato_id,
+        tipo: "recibo", referencia: String(r.numero_recibo),
+        mensaje: completarPlantilla(cfg("plantilla_recibo"), datos),
+      });
     },
   });
 }
@@ -2783,12 +2867,18 @@ function abrirLiquidacion(propietarioId = null) {
 async function verLiquidacion(numeroLiq) {
   const filas = await call("get_comprobante", { numero: numeroLiq });
   const prop = filas[0].pagos?.contratos?.inmuebles?.propietarios || {};
-  openPrint(htmlLiquidacion(filas, configCompleta()), {
+  const htmlDoc = htmlLiquidacion(filas, configCompleta());
+  openPrint(htmlDoc, {
     titulo: `Liquidación N° ${numeroLiq}`,
     whatsapp: async () => {
       const datos = { ...datosBaseMensaje(), nombre: primerNombre(prop.nombre), numero: numeroLiq, monto: money(totalesLiquidacion(filas).neto) };
-      await enviarWhatsapp({ telefono: prop.telefono, nombre: prop.nombre, tipo: "liquidacion", referencia: String(numeroLiq), mensaje: completarPlantilla(cfg("plantilla_liquidacion"), datos) });
-      toast("Tip: guardá la liquidación en PDF y adjuntala en el chat que se abrió.");
+      const nombreArchivo = `Liquidacion_N${numeroLiq}_${(prop.nombre || "").split(" ").slice(0, 2).join("_")}`;
+      await enviarWhatsappConPdf({
+        htmlDoc, apaisado: false, nombrePdf: nombreArchivo,
+        telefono: prop.telefono, nombre: prop.nombre,
+        tipo: "liquidacion", referencia: String(numeroLiq),
+        mensaje: completarPlantilla(cfg("plantilla_liquidacion"), datos),
+      });
     },
   });
 }
