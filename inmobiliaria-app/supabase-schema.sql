@@ -330,6 +330,12 @@ CREATE TABLE IF NOT EXISTS documentos_generados (
 );
 CREATE INDEX IF NOT EXISTS documentos_generados_contrato ON documentos_generados(contrato_id);
 
+-- ---------- Balance en cero (v0.12.3) ----------
+-- Período (YYYY-MM) hasta el que un contrato se considera cerrado: cualquier
+-- mes anterior o igual no aparece como deuda. Lo deja en '2026-10' para los
+-- contratos de la carga inicial, así desde noviembre 2026 arrancamos limpios.
+ALTER TABLE contratos ADD COLUMN IF NOT EXISTS liquidado_hasta TEXT;
+
 -- ---------- Servicios (v0.9.0) ----------
 CREATE TABLE IF NOT EXISTS servicios_estado (
     id          BIGSERIAL PRIMARY KEY,

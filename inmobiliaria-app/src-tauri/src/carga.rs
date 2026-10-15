@@ -223,6 +223,15 @@ pub async fn importar_carga_inicial(
                 let base = format!("Carga inicial desde {} / {}", texto(c, "carpeta"), texto(c, "archivo"));
                 if n.is_empty() { base } else { format!("{}\n{}", n, base) }
             };
+            // Marca el contrato como saldado hasta el mes pagado por fuera de la app
+            // (por defecto, octubre 2026). Así los meses anteriores no se suman como
+            // deuda del inquilino en el tablero.
+            let periodo_pagado = datos.get("periodo_pagado").and_then(Value::as_str).unwrap_or("2026-10").to_string();
+            let liquidado_hasta = if c["pagar_octubre"].as_bool().unwrap_or(false) && ini.as_str() <= format!("{}-01", periodo_pagado).as_str() {
+                Some(periodo_pagado.clone())
+            } else {
+                None
+            };
             let body = json!({
                 "inmueble_id": inm_id, "inquilino_id": inq_id, "fecha_inicio": ini, "fecha_fin": texto(k, "fecha_fin"),
                 "dia_pago": k["dia_pago"].as_i64().unwrap_or(10), "monto_inicial": k["monto_inicial"].as_f64().unwrap_or(0.0),
@@ -231,6 +240,7 @@ pub async fn importar_carga_inicial(
                 "tipo_actualizacion": texto(k, "tipo_actualizacion"), "porcentaje_actualizacion": 0,
                 "estado": "activo", "notas": notas,
                 "destino": texto(k, "destino"), "deposito_garantia": 0, "multa_diaria": 0, "conceptos_fijos": [], "numero": numero,
+                "liquidado_hasta": liquidado_hasta,
             });
             let f: Fila = cliente.insert("contratos", &body).await.map_err(map_err)?;
             let cid = f.id;
@@ -257,10 +267,12 @@ pub async fn importar_carga_inicial(
                     .map_err(map_err)?;
             }
 
-            // Octubre ya pagado (sin recibo: número 0).
-            let periodo = datos.get("periodo_pagado").and_then(Value::as_str).unwrap_or("2026-10").to_string();
+            // Octubre ya pagado (sin recibo: número 0). El contrato ya quedó
+            // marcado como "liquidado_hasta" ese mes, así que lo anterior tampoco
+            // aparece como deuda.
             let mut pagado = false;
-            if c["pagar_octubre"].as_bool().unwrap_or(false) && ini.as_str() <= format!("{}-01", periodo).as_str() {
+            if liquidado_hasta.is_some() {
+                let periodo = periodo_pagado.clone();
                 cliente
                     .insert::<Value>(
                         "pagos",

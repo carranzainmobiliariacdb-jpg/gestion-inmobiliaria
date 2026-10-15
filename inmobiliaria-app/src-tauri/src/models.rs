@@ -99,6 +99,11 @@ pub struct Contrato {
     pub multa_diaria: f64,
     #[serde(default)]
     pub conceptos_fijos: Value,
+    /// Período (YYYY-MM) hasta el que el contrato se considera cerrado: todo
+    /// lo anterior o igual queda fuera del cálculo de deuda. Se usó para la
+    /// carga inicial (octubre 2026) y la inmobiliaria puede corregirlo.
+    #[serde(default)]
+    pub liquidado_hasta: Option<String>,
 }
 
 #[derive(Debug, Serialize, Deserialize)]
@@ -130,6 +135,7 @@ pub struct ContratoDetallado {
     pub deposito_garantia: f64,
     pub multa_diaria: f64,
     pub conceptos_fijos: Value,
+    pub liquidado_hasta: Option<String>,
     pub inmueble_codigo: Option<i64>,
     pub inmueble_localidad: Option<String>,
     pub inquilino_telefono: Option<String>,

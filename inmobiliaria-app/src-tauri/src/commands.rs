@@ -502,6 +502,8 @@ struct ContratoEmbed {
     multa_diaria: Option<f64>,
     #[serde(default)]
     conceptos_fijos: Value,
+    #[serde(default)]
+    liquidado_hasta: Option<String>,
     inmuebles: InmuebleDeContrato,
     inquilinos: InquilinoNombre,
     contrato_garantes: Vec<ContratoGaranteEmbed>,
@@ -549,6 +551,7 @@ fn contrato_embed_a_detallado(c: ContratoEmbed, hoy: NaiveDate) -> ContratoDetal
         deposito_garantia: c.deposito_garantia.unwrap_or(0.0),
         multa_diaria: c.multa_diaria.unwrap_or(0.0),
         conceptos_fijos: if c.conceptos_fijos.is_array() { c.conceptos_fijos } else { json!([]) },
+        liquidado_hasta: c.liquidado_hasta,
         inquilino_id: c.inquilino_id,
         inquilino_nombre: c.inquilinos.nombre,
         propietario_id: c.inmuebles.propietario_id,
@@ -594,6 +597,7 @@ pub async fn guardar_contrato(state: State<'_, DbState>, contrato: Contrato) -> 
         "estado": contrato.estado, "notas": contrato.notas,
         "destino": contrato.destino, "deposito_garantia": contrato.deposito_garantia, "multa_diaria": contrato.multa_diaria,
         "conceptos_fijos": if contrato.conceptos_fijos.is_array() { contrato.conceptos_fijos.clone() } else { json!([]) },
+        "liquidado_hasta": contrato.liquidado_hasta,
     });
     let mut body = body;
     // Número de contrato: el que se cargó a mano o el siguiente libre.
@@ -1303,6 +1307,8 @@ pub async fn get_dashboard(state: State<'_, DbState>, dias_vencimiento: i64, dia
         tasa_mora_diaria: f64,
         frecuencia_actualizacion_meses: i64,
         tipo_actualizacion: String,
+        #[serde(default)]
+        liquidado_hasta: Option<String>,
         inmuebles: InmuebleDeContratoSimple,
         inquilinos: InquilinoNombre,
         actualizaciones: Vec<ActualizacionBase>,
@@ -1311,7 +1317,7 @@ pub async fn get_dashboard(state: State<'_, DbState>, dias_vencimiento: i64, dia
     let filas: Vec<ContratoDashRaw> = cliente
         .select(
             "contratos",
-            "estado=eq.activo&select=id,fecha_inicio,fecha_fin,dia_pago,monto_inicial,tasa_mora_diaria,frecuencia_actualizacion_meses,tipo_actualizacion,inmuebles(direccion,propietarios(nombre)),inquilinos(nombre),actualizaciones(fecha_vigencia,monto_nuevo)",
+            "estado=eq.activo&select=id,fecha_inicio,fecha_fin,dia_pago,monto_inicial,tasa_mora_diaria,frecuencia_actualizacion_meses,tipo_actualizacion,liquidado_hasta,inmuebles(direccion,propietarios(nombre)),inquilinos(nombre),actualizaciones(fecha_vigencia,monto_nuevo)",
         )
         .await
         .map_err(map_err)?;
@@ -1332,7 +1338,19 @@ pub async fn get_dashboard(state: State<'_, DbState>, dias_vencimiento: i64, dia
         // --- deudas ---
         let mut periodos_impagos = Vec::new();
         let mut monto_adeudado = 0.0;
-        let mut cursor = NaiveDate::from_ymd_opt(fecha_inicio.year(), fecha_inicio.month(), 1).unwrap();
+        // El primer mes a chequear es el siguiente al "liquidado_hasta" (si existe)
+        // o el mes de inicio del contrato. Así todo lo anterior o igual a
+        // "liquidado_hasta" queda fuera de la deuda (se saldó por fuera de la app).
+        let desde_liquidado = c
+            .liquidado_hasta
+            .as_deref()
+            .and_then(|s| NaiveDate::parse_from_str(&format!("{}-01", s), "%Y-%m-%d").ok())
+            .map(|d| add_months(d, 1));
+        let inicio_mes = NaiveDate::from_ymd_opt(fecha_inicio.year(), fecha_inicio.month(), 1).unwrap();
+        let mut cursor = match desde_liquidado {
+            Some(d) if d > inicio_mes => d,
+            _ => inicio_mes,
+        };
         let limite = NaiveDate::from_ymd_opt(hoy.year(), hoy.month(), 1).unwrap();
         while cursor <= limite {
             let periodo = periodo_de(cursor);

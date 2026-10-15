@@ -441,10 +441,13 @@ const inquilinoDe = (c) => byId(state.inquilinos, c.inquilino_id) || {};
 const propietarioDe = (c) => byId(state.propietarios, c.propietario_id) || {};
 const etiquetaInmueble = (c) => `${c.inmueble_codigo != null ? c.inmueble_codigo + " - " : ""}${c.inmueble_direccion}`;
 
-/** Primer período sin pagar del contrato (o el mes siguiente al último pagado). */
+/** Primer período sin pagar del contrato (o el mes siguiente al último pagado).
+ *  Si el contrato tiene "liquidado_hasta", arranca desde el mes siguiente. */
 function periodoSugerido(c) {
   const hoyP = hoyIso().slice(0, 7);
+  const desdeLiq = c.liquidado_hasta ? sumarMeses(c.liquidado_hasta, 1) : null;
   let p = c.fecha_inicio.slice(0, 7);
+  if (desdeLiq && desdeLiq > p) p = desdeLiq;
   const fin = c.fecha_fin.slice(0, 7);
   while (p <= hoyP && p <= fin) {
     if (!pagoDelPeriodo(c.id, p)) return p;
@@ -2007,6 +2010,8 @@ function contratoFields() {
     { type: "html", html: "<div></div><div></div>" },
     { type: "section", label: "Conceptos que se cobran todos los meses además del alquiler" },
     { name: "conceptos_fijos", label: "", type: "lineas" },
+    { type: "section", label: "Arrastre de la carga inicial" },
+    { name: "liquidado_hasta", label: "Cerrado hasta (período)", type: "month", nullable: true, hint: "Todo lo anterior o igual a este mes queda como saldado y no cuenta como deuda. En blanco = sin arrastre." },
     { name: "notas", label: "Notas", type: "textarea", full: true },
   ];
 }
