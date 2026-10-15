@@ -33,6 +33,12 @@ export const VARIABLES = [
     ["garante1.nombre", "Garante 1: nombre"], ["garante1.dni", "Garante 1: DNI"], ["garante1.domicilio", "Garante 1: domicilio"], ["garante1.garantia", "Garante 1: garantía"],
     ["garante2.nombre", "Garante 2: nombre"], ["garante2.dni", "Garante 2: DNI"], ["garante2.domicilio", "Garante 2: domicilio"], ["garante2.garantia", "Garante 2: garantía"],
   ]],
+  ["Seguro de caución (si hay)", [
+    ["caucion.clausula", "Cláusula completa (sale solo si hay seguro de caución)"],
+    ["caucion.aseguradora", "Aseguradora: nombre"], ["caucion.cuit", "Aseguradora: CUIT"],
+    ["caucion.poliza", "Póliza y detalle (del campo «Detalle de la garantía»)"],
+    ["caucion.domicilio", "Aseguradora: domicilio"],
+  ]],
   ["Inmueble", [
     ["inmueble.direccion", "Dirección completa"], ["inmueble.localidad", "Localidad"], ["inmueble.provincia", "Provincia"],
     ["inmueble.tipo", "Tipo (casa, depto…)"], ["inmueble.descripcion", "Descripción (ambientes, dormitorios…)"],
@@ -121,6 +127,25 @@ export function valoresContrato({ contrato: c, propietario, inquilino, garantes 
     v["garantes.parrafo"] = "";
     v["garantes.firmas"] = "";
   }
+  // Si entre los garantes hay un «Seguro de caución», se arma su cláusula.
+  const caucion = garantes.find((g) => /seguro de cauci[óo]n/i.test(g.tipo_garantia || ""));
+  if (caucion) {
+    const pc = persona(caucion);
+    v["caucion.aseguradora"] = pc.nombre;
+    v["caucion.cuit"] = pc.dni;
+    v["caucion.poliza"] = caucion.detalle_garantia || "";
+    v["caucion.domicilio"] = pc.domicilio;
+    let encabezado = `EL LOCATARIO acompaña, como garantía del fiel cumplimiento de todas las obligaciones asumidas en el presente contrato, Póliza de Seguro de Caución emitida por <b>${esc(pc.nombre)}</b>${pc.dni ? `, CUIT ${esc(pc.dni)}` : ""}${pc.domicilio ? `, con domicilio en ${esc(pc.domicilio)}` : ""}`;
+    if (caucion.detalle_garantia) encabezado += `, conforme al siguiente detalle: ${esc(caucion.detalle_garantia)}`;
+    const partes = [encabezado];
+    partes.push("Las condiciones generales y particulares de la póliza forman parte integrante de este contrato");
+    partes.push("La vigencia de la póliza deberá cubrir todo el plazo locativo y sus eventuales prórrogas; EL LOCATARIO se obliga a mantenerla vigente y a entregar a EL LOCADOR las renovaciones con no menos de treinta (30) días de anticipación a su vencimiento, bajo apercibimiento de ser considerado en mora en el cumplimiento del contrato");
+    partes.push("La caución cubre alquileres, intereses, multas, servicios, impuestos, daños, gastos y costas, hasta la efectiva restitución del inmueble y la cancelación de todo lo adeudado");
+    v["caucion.clausula"] = `<p><b>DECIMOQUINTA – SEGURO DE CAUCIÓN:</b> ${partes.join(". ")}.</p>`;
+  } else {
+    v["caucion.aseguradora"] = v["caucion.cuit"] = v["caucion.poliza"] = v["caucion.domicilio"] = "";
+    v["caucion.clausula"] = "";
+  }
   const dir = [inmueble.direccion, inmueble.piso_depto].filter(Boolean).join(" ");
   const desc = [
     inmueble.ambientes ? `${cantidad(inmueble.ambientes)} (${inmueble.ambientes}) ambiente${inmueble.ambientes > 1 ? "s" : ""}` : "",
@@ -205,7 +230,7 @@ export function completarModelo(modeloHtml, valores) {
       return `<mark class="falta" title="Falta: ${clave}">[${clave}]</mark>`;
     }
     // Los valores que ya son HTML (párrafo de garantes, firmas) van tal cual.
-    return /^(garantes\.)/.test(clave) ? String(val) : esc(val);
+    return /^(garantes\.|caucion\.clausula$)/.test(clave) ? String(val) : esc(val);
   });
   return { html, faltan: [...faltan] };
 }
@@ -257,6 +282,7 @@ export const MODELOS_BASE = [
 <p><b>DUODÉCIMA – GARANTÍA:</b> {{garantes.parrafo}}, se constituye/n en fiador/es solidario/s, liso/s, llano/s y principal/es pagador/es de todas las obligaciones asumidas por EL LOCATARIO en el presente contrato, con renuncia a los beneficios de excusión y división, hasta la total restitución del inmueble y el pago de todo lo adeudado.</p>
 <p><b>DECIMOTERCERA – DOMICILIOS Y JURISDICCIÓN:</b> Las partes constituyen domicilio en los indicados en el encabezamiento, donde serán válidas todas las notificaciones, y se someten a la jurisdicción de {{inmobiliaria.jurisdiccion}}, renunciando a cualquier otro fuero.</p>
 <p><b>DECIMOCUARTA – SELLADO:</b> El impuesto de sellos que corresponda a este contrato será soportado por las partes en proporciones iguales.</p>
+{{caucion.clausula}}
 <p>En prueba de conformidad se firman tres (3) ejemplares de un mismo tenor y a un solo efecto, en el lugar y fecha indicados.</p>
 ${FIRMAS}`,
   },
@@ -274,6 +300,7 @@ ${FIRMAS}`,
 <p><b>SÉPTIMA – DEPÓSITO:</b> Pesos {{contrato.deposito_letras}} ({{contrato.deposito}}), a devolver al finalizar la locación previa verificación del estado del inmueble y de la inexistencia de deudas.</p>
 <p><b>OCTAVA – MEJORAS:</b> Toda modificación requiere autorización escrita de EL LOCADOR y quedará a beneficio del inmueble.</p>
 <p><b>NOVENA – GARANTÍA:</b> {{garantes.parrafo}}, se constituye/n en fiador/es solidario/s y principal/es pagador/es de las obligaciones de EL LOCATARIO.</p>
+{{caucion.clausula}}
 <p><b>DÉCIMA – JURISDICCIÓN:</b> {{inmobiliaria.jurisdiccion}}.</p>
 <p>Se firman tres ejemplares de un mismo tenor en el lugar y fecha indicados.</p>
 ${FIRMAS}`,
