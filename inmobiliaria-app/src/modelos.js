@@ -141,7 +141,7 @@ export function valoresContrato({ contrato: c, propietario, inquilino, garantes 
     partes.push("Las condiciones generales y particulares de la póliza forman parte integrante de este contrato");
     partes.push("La vigencia de la póliza deberá cubrir todo el plazo locativo y sus eventuales prórrogas; EL LOCATARIO se obliga a mantenerla vigente y a entregar a EL LOCADOR las renovaciones con no menos de treinta (30) días de anticipación a su vencimiento, bajo apercibimiento de ser considerado en mora en el cumplimiento del contrato");
     partes.push("La caución cubre alquileres, intereses, multas, servicios, impuestos, daños, gastos y costas, hasta la efectiva restitución del inmueble y la cancelación de todo lo adeudado");
-    v["caucion.clausula"] = `<p><b>DECIMOQUINTA – SEGURO DE CAUCIÓN:</b> ${partes.join(". ")}.</p>`;
+    v["caucion.clausula"] = `<p><b>DECIMOSEXTA – SEGURO DE CAUCIÓN:</b> ${partes.join(". ")}.</p>`;
   } else {
     v["caucion.aseguradora"] = v["caucion.cuit"] = v["caucion.poliza"] = v["caucion.domicilio"] = "";
     v["caucion.clausula"] = "";
@@ -282,6 +282,7 @@ export const MODELOS_BASE = [
 <p><b>DUODÉCIMA – GARANTÍA:</b> {{garantes.parrafo}}, se constituye/n en fiador/es solidario/s, liso/s, llano/s y principal/es pagador/es de todas las obligaciones asumidas por EL LOCATARIO en el presente contrato, con renuncia a los beneficios de excusión y división, hasta la total restitución del inmueble y el pago de todo lo adeudado.</p>
 <p><b>DECIMOTERCERA – DOMICILIOS Y JURISDICCIÓN:</b> Las partes constituyen domicilio en los indicados en el encabezamiento, donde serán válidas todas las notificaciones, y se someten a la jurisdicción de {{inmobiliaria.jurisdiccion}}, renunciando a cualquier otro fuero.</p>
 <p><b>DECIMOCUARTA – SELLADO:</b> El impuesto de sellos que corresponda a este contrato será soportado por las partes en proporciones iguales.</p>
+<p><b>DECIMOQUINTA – SERVICIOS ATRASADOS Y RECONEXIÓN:</b> EL LOCATARIO y, en forma solidaria, sus fiadores, se obligan a pagar la totalidad de las facturas de luz, agua y gas y de cualquier otro servicio a su cargo, incluidas las que lleguen o se emitan con posterioridad a la finalización del contrato o a la restitución del inmueble, cuando correspondan a consumos efectuados durante la vigencia de la locación o imputables a su uso. Si por falta de pago u otra causa imputable a EL LOCATARIO se produjera el corte o la suspensión de cualquiera de dichos servicios, serán también a su exclusivo cargo —y de sus fiadores en forma solidaria— las deudas acumuladas, los recargos, intereses, multas, gastos administrativos, y la totalidad de los costos de rehabilitación, reconexión y de las obras, materiales y mano de obra que la empresa prestataria requiera para restablecer el servicio, debiendo entregar el inmueble al finalizar la locación con todos los servicios activos, pagos y en pleno funcionamiento.</p>
 {{caucion.clausula}}
 <p>En prueba de conformidad se firman tres (3) ejemplares de un mismo tenor y a un solo efecto, en el lugar y fecha indicados.</p>
 ${FIRMAS}`,
@@ -300,8 +301,9 @@ ${FIRMAS}`,
 <p><b>SÉPTIMA – DEPÓSITO:</b> Pesos {{contrato.deposito_letras}} ({{contrato.deposito}}), a devolver al finalizar la locación previa verificación del estado del inmueble y de la inexistencia de deudas.</p>
 <p><b>OCTAVA – MEJORAS:</b> Toda modificación requiere autorización escrita de EL LOCADOR y quedará a beneficio del inmueble.</p>
 <p><b>NOVENA – GARANTÍA:</b> {{garantes.parrafo}}, se constituye/n en fiador/es solidario/s y principal/es pagador/es de las obligaciones de EL LOCATARIO.</p>
+<p><b>DÉCIMA – SERVICIOS ATRASADOS Y RECONEXIÓN:</b> EL LOCATARIO y, en forma solidaria, sus fiadores, se obligan a pagar la totalidad de las facturas de luz, agua y gas y de cualquier otro servicio a su cargo, incluidas las que lleguen o se emitan con posterioridad a la finalización del contrato o a la restitución del inmueble, cuando correspondan a consumos efectuados durante la vigencia de la locación o imputables a su uso. Si por falta de pago u otra causa imputable a EL LOCATARIO se produjera el corte o la suspensión de cualquiera de dichos servicios, serán también a su exclusivo cargo —y de sus fiadores en forma solidaria— las deudas acumuladas, los recargos, intereses, multas, gastos administrativos y la totalidad de los costos de rehabilitación, reconexión y de las obras, materiales y mano de obra que la empresa prestataria requiera para restablecer el servicio, debiendo entregar el inmueble al finalizar la locación con todos los servicios activos, pagos y en pleno funcionamiento.</p>
 {{caucion.clausula}}
-<p><b>DÉCIMA – JURISDICCIÓN:</b> {{inmobiliaria.jurisdiccion}}.</p>
+<p><b>UNDÉCIMA – JURISDICCIÓN:</b> {{inmobiliaria.jurisdiccion}}.</p>
 <p>Se firman tres ejemplares de un mismo tenor en el lugar y fecha indicados.</p>
 ${FIRMAS}`,
   },
