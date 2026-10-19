@@ -534,3 +534,13 @@ small.muted { font-size: 12px; }
 .cb-tabla th { text-align: left; font-size: 11px; text-transform: uppercase; letter-spacing: 0.4px; color: var(--text-muted); padding: 4px 6px; border-bottom: 1px solid var(--border); }
 .cb-tabla td { padding: 5px 6px; border-bottom: 1px solid var(--border); vertical-align: middle; }
 .cb-tabla input { width: 100%; min-width: 90px; }
+/* Constancia de servicios */
+.cs-estado { display: flex; flex-direction: column; gap: 2px; padding: 10px 14px; margin: 4px 0 12px; border-radius: 6px; border: 1.5px solid; }
+.cs-estado b { font-size: 16px; letter-spacing: 0.5px; }
+.cs-estado span { font-size: 11px; }
+.cs-ok { border-color: #2e7d4f; background: #e8f5ed; color: #1d5a37; }
+.cs-deuda { border-color: #b42318; background: #fdecea; color: #8a1c13; }
+.cs-aviso { border-color: #c39b4a; background: #f5ecd8; color: #5c4719; }
+.cs-fila-venc td { color: #8a1c13; }
+.doc-constancia .liq-tabla tfoot td { border-top: 1.5px solid #c39b4a; padding-top: 6px; }
+.cs-nota { font-size: 9.5px; color: #555; margin: 12px 0 0; }

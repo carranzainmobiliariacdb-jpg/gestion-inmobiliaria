@@ -105,7 +105,8 @@
         });
       });
     }
-    var sinDeuda = !tabla && /no (registra|posee|tiene) deuda|sin deuda/i.test(document.body.textContent);
+    var sinDeuda = !tabla && /no (registra|posee|tiene|existe) deuda|sin deuda/i.test(document.body.textContent);
+    var resultado = { cuenta: cuenta, documentos: documentos, error: !(tabla || sinDeuda) };
     reportar({
       estado: "fin",
       contratos: [
@@ -121,17 +122,54 @@
         },
       ],
     });
+    return resultado;
+  }
+
+  // Barra arriba de la página: confirma que la app ya guardó la deuda y
+  // permite guardar esta misma página en PDF (Ctrl+P → «Guardar como PDF»).
+  function mostrarBarra(r) {
+    if (document.getElementById("__barraApp")) return;
+    var b = document.createElement("div");
+    b.id = "__barraApp";
+    b.setAttribute("style", "position:sticky;top:0;z-index:2147483647;display:flex;gap:12px;align-items:center;justify-content:space-between;padding:10px 16px;background:#15181e;color:#fff;font:14px Segoe UI,Arial,sans-serif;box-shadow:0 2px 8px rgba(0,0,0,.3)");
+    b.innerHTML =
+      (r.error
+        ? '<span>⚠ <b>Gestión Inmobiliaria</b> no encontró el listado de deuda de la cuenta ' + r.cuenta + ". Revisá la página; podés guardarla en PDF igual.</span>"
+        : '<span>✓ <b>Gestión Inmobiliaria</b> ya guardó la deuda de la cuenta ' + r.cuenta + (r.documentos.length ? "" : " (sin deuda)") + ". La constancia en PDF está en la app.</span>") +
+      '<span><button id="__pdfApp" style="background:#c39b4a;color:#15181e;border:0;border-radius:8px;padding:8px 14px;font-weight:700;cursor:pointer">Guardar esta página en PDF</button></span>';
+    document.body.insertBefore(b, document.body.firstChild);
+    document.getElementById("__pdfApp").addEventListener("click", function () {
+      b.style.display = "none";
+      setTimeout(function () {
+        window.print();
+        b.style.display = "flex";
+      }, 50);
+    });
   }
 
   function vigilar() {
     if (/\/deuda\/listadodeuda/i.test(location.pathname)) {
       if (!window.__aguaLeido) {
         window.__aguaLeido = true;
-        leerListado();
+        var r = leerListado();
+        setTimeout(function () {
+          mostrarBarra(r);
+        }, 300);
       }
       return;
     }
-    if (/\/cbus\/deuda\/?$/i.test(location.pathname)) prepararFormulario();
+    if (/\/cbus\/deuda\/?$/i.test(location.pathname)) {
+      prepararFormulario();
+      // Si la Municipalidad responde en la misma página que la cuenta no tiene deuda.
+      var aviso = document.querySelector(".alert, .alert-info, .alert-success, .mensaje, .swal2-html-container");
+      if (!window.__aguaLeido && cuentaPedida() && aviso && /no (registra|posee|tiene|existe) deuda|sin deuda|no se encontr/i.test(texto(aviso))) {
+        window.__aguaLeido = true;
+        var r = leerListado();
+        setTimeout(function () {
+          mostrarBarra(r);
+        }, 300);
+      }
+    }
   }
 
   setInterval(vigilar, 800);

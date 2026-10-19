@@ -248,3 +248,51 @@ export function htmlActaFotos({ inmueble, contrato, fotos, tipo, fecha }, cfg) {
     </div>
   </div>`;
 }
+
+/** Constancia del estado de una cuenta de servicio (agua, luz o gas) según la
+ *  última consulta guardada. `f` = fila de servicios_estado. */
+export function htmlConstanciaServicio({ f, servicio, empresa, fuente, inmuebles, contrato, vencidos, hoy }, cfg) {
+  const m = String(f.actualizado || "").match(/^(\d{4})-(\d{2})-(\d{2})\s+(\d{2}:\d{2})/);
+  const consultado = m ? `${m[3]}/${m[2]}/${m[1]} ${m[4]} hs` : f.actualizado || "";
+  const docs = Array.isArray(f.documentos) ? f.documentos : [];
+  const esVencido = (d) => vencidos.includes(d);
+  const totalVenc = vencidos.reduce((a, d) => a + Number(d.importe || 0), 0);
+  const porVencer = docs.filter((d) => !esVencido(d));
+  const totalPorVencer = porVencer.reduce((a, d) => a + Number(d.importe || 0), 0);
+  const estado = f.error
+    ? { clase: "cs-aviso", titulo: "NO SE PUDO LEER LA DEUDA", detalle: f.error }
+    : vencidos.length
+      ? { clase: "cs-deuda", titulo: `REGISTRA DEUDA VENCIDA: ${money(totalVenc)}`, detalle: `${vencidos.length} ${vencidos.length === 1 ? "boleta vencida" : "boletas vencidas"}${porVencer.length ? ` · además ${money(totalPorVencer)} por vencer` : ""}` }
+      : porVencer.length
+        ? { clase: "cs-ok", titulo: "AL DÍA — SIN DEUDA VENCIDA", detalle: `Tiene ${porVencer.length} ${porVencer.length === 1 ? "boleta" : "boletas"} por vencer: ${money(totalPorVencer)}` }
+        : { clase: "cs-ok", titulo: "AL DÍA — SIN DEUDA", detalle: "No registra boletas a pagar" };
+  const filas = docs
+    .map(
+      (d) => `<tr class="${esVencido(d) ? "cs-fila-venc" : ""}"><td>${esc(d.periodo || "")}</td><td>${esc(d.tipo || "")}</td><td>${esc(d.numero || "")}</td><td>${esc(d.vencimiento || "")}</td>
+      <td>${esVencido(d) ? "<b>Vencida</b>" : "Por vencer"}</td><td class="num">${n0(d.importe)}</td></tr>`
+    )
+    .join("");
+  const inms = (inmuebles || []).map((i) => `${i.codigo != null && i.codigo !== "" ? esc(i.codigo) + " - " : ""}${esc([i.direccion, i.piso_depto].filter(Boolean).join(" "))}`).join("<br/>");
+  return `<div class="doc doc-acta doc-constancia">
+    ${encabezado(cfg, `Constancia de ${servicio}`)}
+    <div class="acta-cuerpo">
+      <h2>Estado de deuda — ${esc(servicio)} (${esc(empresa)})</h2>
+      <div class="acta-datos">
+        <div><label>Cuenta N°:</label> <b>${esc(f.cuenta)}</b></div>
+        <div><label>Consultado:</label> <b>${esc(consultado)}</b></div>
+        <div><label>Titular en ${esc(empresa)}:</label> <b>${esc(f.titular || "-")}</b></div>
+        <div><label>Inquilino:</label> <b>${esc(contrato?.inquilino_nombre || "-")}</b></div>
+        <div style="grid-column:1/-1"><label>Inmueble:</label> <b>${inms || esc(f.direccion || "-")}</b></div>
+      </div>
+      <div class="cs-estado ${estado.clase}"><b>${estado.titulo}</b><span>${esc(estado.detalle)}</span></div>
+      ${
+        docs.length
+          ? `<table class="liq-tabla"><thead><tr><th>Período</th><th>Descripción</th><th>Boleta</th><th>Vencimiento</th><th>Estado</th><th class="num">Importe</th></tr></thead><tbody>${filas}</tbody>
+             <tfoot><tr><td colspan="5"><b>Total a pagar</b></td><td class="num"><b>${n0(totalVenc + totalPorVencer)}</b></td></tr></tfoot></table>`
+          : ""
+      }
+      <p class="cs-nota">Datos leídos de ${esc(fuente)} el ${esc(consultado)}. Constancia interna de ${esc(cfg.inmobiliaria_nombre || "la inmobiliaria")}: el estado puede cambiar después de la consulta.</p>
+    </div>
+    <div class="liq-pie">Impreso: ${fmtDate(hoy || hoyIso())}</div>
+  </div>`;
+}

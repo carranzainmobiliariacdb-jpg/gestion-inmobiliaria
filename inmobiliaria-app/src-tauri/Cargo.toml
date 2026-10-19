@@ -1,6 +1,6 @@
 [package]
 name = "inmobiliaria-app"
-version = "0.13.0"
+version = "0.13.1"
 description = "Inmobiliaria App - Gestion de alquileres"
 authors = ["you"]
 edition = "2021"

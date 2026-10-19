@@ -3,7 +3,7 @@ import {
   montoEnLetras, telefonoWhatsapp, enlaceWhatsapp, completarPlantilla, primerNombre, serieIpcCompleta, calcularIpc,
 } from "./util.js";
 import { leerCodigoDni, interpretarCodigoDni, leerMrzDni, comprimirFoto, calcularCuil } from "./dni.js";
-import { htmlRecibo, htmlLiquidacion, htmlActaFotos, totalesRecibo, totalesLiquidacion, pagoCombinado, periodosDeRecibo } from "./documentos.js";
+import { htmlRecibo, htmlLiquidacion, htmlActaFotos, totalesRecibo, totalesLiquidacion, pagoCombinado, periodosDeRecibo, htmlConstanciaServicio } from "./documentos.js";
 import { VARIABLES as VARIABLES_MODELO, MODELOS_BASE, valoresContrato, completarModelo, htmlParaWord } from "./modelos.js";
 
 const invoke = window.__TAURI__.core.invoke;
@@ -709,17 +709,17 @@ async function avisoCumple(clave) {
 const FUENTES = {
   luz: {
     nombre: "Luz", empresa: "EPEC", icono: "⚡", campo: "servicio_luz_contrato", etiqueta: "contrato",
-    cfgUltima: "servicios_luz_ultima", cfgActivo: "epec_activo",
+    cfgUltima: "servicios_luz_ultima", cfgActivo: "epec_activo", fuente: "la Oficina Virtual de EPEC (epec.com.ar)",
     login: "Iniciá sesión en la ventana de EPEC (tildá «Recordar»). La revisión sigue sola después.",
   },
   gas: {
     nombre: "Gas", empresa: "Emprendimientos 2001", icono: "🔥", campo: "servicio_gas", etiqueta: "cuenta",
-    cfgUltima: "servicios_gas_ultima", cfgActivo: "gas2001_activo",
+    cfgUltima: "servicios_gas_ultima", cfgActivo: "gas2001_activo", fuente: "la oficina virtual de Emprendimientos 2001 (cooponlineweb.com.ar)",
     login: "Iniciá sesión en la ventana de Emprendimientos 2001 (tildá «Recordarme en este equipo»). La revisión sigue sola después.",
   },
   agua: {
     nombre: "Agua", empresa: "Municipalidad", icono: "💧", campo: "servicio_agua", etiqueta: "cuenta",
-    cfgUltima: "servicios_agua_ultima", cfgActivo: "agua_muni_activo", manual: true,
+    cfgUltima: "servicios_agua_ultima", cfgActivo: "agua_muni_activo", manual: true, fuente: "la página de deuda de la Municipalidad (municipalidad.com/cbus)",
     login: "En la ventana de la Municipalidad hacé la verificación y tocá «Aceptar». La app lee la deuda sola.",
   },
 };
@@ -905,7 +905,7 @@ function renderServicios() {
       <td>${c ? `${esc(c.inquilino_nombre)}<span class="sub-line">${esc(c.inquilino_telefono || "sin teléfono")}</span>` : `<span class="sub-line">${inm ? "Sin contrato activo" : "—"}</span>`}</td>
       <td>${docs || `<span class="sub-line">Nada a pagar</span>`}${f.error ? `<span class="sub-line">⚠ ${esc(f.error)}</span>` : ""}</td>
       <td>${venc.length ? `<span class="pill pill-danger">${money(total)}</span>` : `<span class="pill pill-ok">Al día</span>`}</td>
-      <td class="actions">${accion}</td></tr>`;
+      <td class="actions"><button class="btn-link" data-constancia="${f.servicio}|${esc(normCuenta(f.cuenta))}">PDF</button>${accion}</td></tr>`;
     return !q || fila.toLowerCase().replace(/<[^>]+>/g, " ").includes(q) ? fila : "";
   });
   const visibles = html.filter(Boolean);
@@ -962,7 +962,8 @@ async function revisarServicio(servicio, { visible = false, cuenta = null } = {}
     if (e.estado !== "fin" && Date.now() - ultimoCambio > 45000) mostrar();
     if (e.estado === "fin") {
       terminar();
-      invoke("servicio_cerrar", { servicio }).catch(console.error);
+      // El agua deja abierta la página de la Municipalidad (para guardarla en PDF si se quiere).
+      if (!fu.manual) invoke("servicio_cerrar", { servicio }).catch(console.error);
       try {
         await call("guardar_servicios_estado", { servicio, filas: e.contratos || [] });
         const ahora = new Date();
@@ -973,6 +974,7 @@ async function revisarServicio(servicio, { visible = false, cuenta = null } = {}
         state.servicios = await call("get_servicios_estado");
         const conDeuda = (e.contratos || []).filter((x) => docsVencidos(x).length).length;
         toast(`${fu.empresa} revisado: ${(e.contratos || []).length} cuentas, ${conDeuda} con facturas vencidas`);
+        if (fu.manual && cuenta) verConstanciaServicio(servicio, cuenta);
       } catch (err) {
         console.error(err);
       }
@@ -1090,6 +1092,46 @@ document.addEventListener("click", (e) => {
   if (b.dataset.srvVincular) abrirVincularServicio(s);
 });
 
+// ---------- Constancia en PDF del estado de una cuenta de servicio ----------
+
+function verConstanciaServicio(servicio, cuenta) {
+  const fu = FUENTES[servicio];
+  const n = normCuenta(cuenta);
+  const f = (state.servicios || []).find((x) => x.servicio === servicio && normCuenta(x.cuenta) === n);
+  if (!f) return toast("Esa cuenta todavía no se consultó", true);
+  const inmuebles = state.inmuebles.filter((i) => normCuenta(i[fu.campo]) === n);
+  const contrato = inmuebles.map((i) => contratoActivoDe(i.id)).find(Boolean) || null;
+  const vencidos = docsVencidos(f);
+  const htmlDoc = htmlConstanciaServicio(
+    { f, servicio: fu.nombre, empresa: fu.empresa, fuente: fu.fuente, inmuebles, contrato, vencidos, hoy: hoyIso() },
+    configCompleta()
+  );
+  const lugar = inmuebles[0]?.direccion || f.direccion || "";
+  openPrint(htmlDoc, {
+    titulo: `Constancia ${fu.nombre.toLowerCase()} — cuenta ${f.cuenta}`,
+    whatsapp: contrato
+      ? async () => {
+          const deuda = vencidos.reduce((a, d) => a + Number(d.importe || 0), 0);
+          await enviarWhatsappConPdf({
+            htmlDoc, apaisado: false,
+            nombrePdf: `Constancia_${fu.nombre}_${n}_${(f.actualizado || hoyIso()).slice(0, 10)}`,
+            telefono: contrato.inquilino_telefono, nombre: contrato.inquilino_nombre, contrato_id: contrato.id,
+            tipo: "servicio", referencia: `constancia:${servicio}:${n}:${(f.actualizado || "").slice(0, 10)}`,
+            mensaje: `Hola ${primerNombre(contrato.inquilino_nombre)}, te enviamos el estado del servicio de ${NOMBRE_SERVICIO[servicio]} de ${lugar} (cuenta ${f.cuenta}) consultado el ${f.actualizado}: ${vencidos.length ? `registra deuda vencida por ${money(deuda)}.` : "está al día."} ${cfg("inmobiliaria_nombre") || ""}`.trim(),
+          });
+        }
+      : null,
+  });
+}
+
+document.addEventListener("click", (e) => {
+  const b = e.target.closest("[data-constancia]");
+  if (!b) return;
+  const [servicio, cuenta] = b.dataset.constancia.split("|");
+  closeModal();
+  verConstanciaServicio(servicio, cuenta);
+});
+
 // ---------- Agua (Municipalidad): consulta cuenta por cuenta ----------
 
 function abrirConsultaAgua() {
@@ -1107,13 +1149,13 @@ function abrirConsultaAgua() {
     const estado = !f ? '<span class="muted">Sin consultar</span>' : venc.length ? `<span class="pill pill-danger">${money(deuda)} vencido</span>` : '<span class="pill pill-ok">Al día</span>';
     return `<tr><td><b>${esc(n)}</b></td><td>${inms.map((i) => `${codHtml(i.codigo)}${esc(i.direccion)}${i.piso_depto ? " " + esc(i.piso_depto) : ""}`).join("<br/>")}</td>
       <td>${estado}${f?.actualizado ? `<span class="sub-line">Consultado ${esc(f.actualizado)}</span>` : ""}</td>
-      <td class="actions"><button class="btn-secondary btn-sm" data-agua-cuenta="${esc(n)}">Consultar</button></td></tr>`;
+      <td class="actions">${f ? `<button class="btn-link" data-constancia="agua|${esc(n)}">PDF</button>` : ""}<button class="btn-secondary btn-sm" data-agua-cuenta="${esc(n)}">Consultar</button></td></tr>`;
   });
   openModal({
     title: "Agua — Municipalidad",
     size: "wide",
     sinGuardar: true,
-    html: `<div id="agua-cuerpo"><p class="hint">Al tocar «Consultar» se abre la página de la Municipalidad con la cuenta ya escrita. Hacé la verificación de Cloudflare y tocá «Aceptar»: la app lee la deuda, la guarda y la ventana se cierra sola.</p>
+    html: `<div id="agua-cuerpo"><p class="hint">Al tocar «Consultar» se abre la página de la Municipalidad con la cuenta ya escrita. Hacé la verificación de Cloudflare y tocá «Aceptar»: la app lee la deuda, la guarda y te muestra la constancia para guardarla en PDF. La página de la Municipalidad queda abierta por si también querés guardarla tal cual (botón dorado arriba).</p>
       <div class="toolbar"><input class="search" id="agua-otra" placeholder="Otra cuenta (N°)" style="max-width:200px" /><button class="btn-secondary btn-sm" id="agua-otra-btn">Consultar</button></div>
       <div class="table-wrap"><table class="data-table"><thead><tr><th>Cuenta</th><th>Inmueble(s)</th><th>Estado</th><th></th></tr></thead><tbody>${filas.join("") || vacio(4, "Ningún inmueble tiene cargado el N° de cuenta de agua (campo «Agua» del inmueble).")}</tbody></table></div></div>`,
     onMount: () => {
