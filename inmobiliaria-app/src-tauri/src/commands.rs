@@ -692,15 +692,14 @@ fn suma_conceptos(conceptos: &Value) -> f64 {
         .unwrap_or(0.0)
 }
 
-#[tauri::command]
-pub async fn registrar_pago(state: State<'_, DbState>, nuevo: NuevoPago) -> Result<i64, String> {
-    let cliente = obtener_cliente(&state).await?;
+/// Calcula los importes de un período y lo inserta con el número de recibo dado.
+async fn insertar_pago(cliente: &Cliente, nuevo: &NuevoPago, numero_recibo: i64) -> Result<i64, String> {
     let contrato: ContratoParaPago = cliente
         .select_uno("contratos", &format!("id=eq.{}&select=dia_pago,tasa_mora_diaria,monto_inicial,multa_diaria", nuevo.contrato_id))
         .await
         .map_err(map_err)?
         .ok_or_else(|| "El contrato no existe".to_string())?;
-    let actualizaciones = actualizaciones_de(&cliente, nuevo.contrato_id).await?;
+    let actualizaciones = actualizaciones_de(cliente, nuevo.contrato_id).await?;
 
     let fecha_pago = parse_date(&nuevo.fecha_pago);
     let vencimiento = due_date_for_periodo(&nuevo.periodo, contrato.dia_pago);
@@ -715,8 +714,6 @@ pub async fn registrar_pago(state: State<'_, DbState>, nuevo: NuevoPago) -> Resu
         monto_alquiler + monto_mora + monto_multa + suma_conceptos(&conceptos) + nuevo.recargo - nuevo.bonificacion - nuevo.a_favor,
     );
 
-    let numero_recibo = siguiente_numero_recibo(&cliente).await?;
-
     let body = json!({
         "contrato_id": nuevo.contrato_id, "periodo": nuevo.periodo, "fecha_pago": nuevo.fecha_pago,
         "monto_alquiler": monto_alquiler, "dias_mora": dias_mora, "monto_mora": monto_mora, "monto_total": monto_total,
@@ -726,6 +723,38 @@ pub async fn registrar_pago(state: State<'_, DbState>, nuevo: NuevoPago) -> Resu
     });
     let fila: FilaId = cliente.insert("pagos", &body).await.map_err(map_err)?;
     Ok(fila.id)
+}
+
+#[tauri::command]
+pub async fn registrar_pago(state: State<'_, DbState>, nuevo: NuevoPago) -> Result<i64, String> {
+    let cliente = obtener_cliente(&state).await?;
+    let numero_recibo = siguiente_numero_recibo(&cliente).await?;
+    insertar_pago(&cliente, &nuevo, numero_recibo).await
+}
+
+/// Cobra varios períodos juntos: una fila de `pagos` por período, todas con el
+/// mismo número de recibo (un solo recibo impreso). Devuelve los ids.
+/// Si falla a mitad de camino, borra lo que ya había insertado.
+#[tauri::command]
+pub async fn registrar_pagos(state: State<'_, DbState>, nuevos: Vec<NuevoPago>) -> Result<Vec<i64>, String> {
+    if nuevos.is_empty() {
+        return Err("Elegí al menos un período".to_string());
+    }
+    let cliente = obtener_cliente(&state).await?;
+    let numero_recibo = siguiente_numero_recibo(&cliente).await?;
+    let mut ids = Vec::new();
+    for nuevo in &nuevos {
+        match insertar_pago(&cliente, nuevo, numero_recibo).await {
+            Ok(id) => ids.push(id),
+            Err(e) => {
+                for id in &ids {
+                    let _ = cliente.delete("pagos", &format!("id=eq.{}", id)).await;
+                }
+                return Err(e);
+            }
+        }
+    }
+    Ok(ids)
 }
 
 /// Lee un valor de la tabla `configuracion` (None si no existe).
@@ -795,6 +824,22 @@ pub async fn get_recibo(state: State<'_, DbState>, pago_id: i64) -> Result<Value
         .await
         .map_err(map_err)?
         .ok_or_else(|| "El pago no existe".to_string())?;
+    let mut fila = fila;
+    // Todos los períodos cobrados con el mismo recibo (cobro de varios meses juntos).
+    let numero = fila.get("numero_recibo").and_then(|n| n.as_i64()).unwrap_or(0);
+    let contrato_id = fila.get("contrato_id").and_then(|n| n.as_i64()).unwrap_or(0);
+    let filas: Vec<Value> = if numero > 0 {
+        cliente
+            .select("pagos", &format!("numero_recibo=eq.{}&contrato_id=eq.{}&select=*&order=periodo.asc,id.asc", numero, contrato_id))
+            .await
+            .map_err(map_err)?
+    } else {
+        Vec::new()
+    };
+    if let Some(obj) = fila.as_object_mut() {
+        let filas = if filas.is_empty() { vec![obj.clone().into_iter().filter(|(k, _)| k != "contratos").collect::<serde_json::Map<_, _>>().into()] } else { filas };
+        obj.insert("filas".to_string(), Value::Array(filas));
+    }
     Ok(fila)
 }
 

@@ -64,6 +64,7 @@ pub fn manejador<R: tauri::Runtime>() -> impl Fn(tauri::ipc::Invoke<R>) -> bool 
         commands::eliminar_actualizacion,
         commands::get_pagos,
         commands::registrar_pago,
+        commands::registrar_pagos,
         commands::eliminar_pago,
         commands::get_recibo,
         commands::get_liquidaciones,

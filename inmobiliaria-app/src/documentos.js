@@ -2,7 +2,7 @@
 // recibo de alquiler (duplicado + original en A4 apaisado, igual al modelo
 // que usa la inmobiliaria) y liquidación al propietario (A4 vertical).
 
-import { esc, money, numero, fmtDate, hoyIso, periodoTexto, mesDeContrato, montoEnLetras } from "./util.js";
+import { esc, money, numero, fmtDate, hoyIso, periodoTexto, mesDeContrato, montoEnLetras, sumarMeses } from "./util.js";
 
 const n0 = (v) => numero(v, 2);
 
@@ -36,23 +36,58 @@ export function totalesRecibo(p) {
   return { conceptos, servicios, otros, alquiler, interes, multa, subtotal, bonificacion, recargo, aFavor, total: subtotal - bonificacion + recargo - aFavor };
 }
 
+/** Períodos cobrados con este recibo (get_recibo trae `filas`; si no, el propio pago). */
+export function filasRecibo(r) {
+  return Array.isArray(r.filas) && r.filas.length ? r.filas : [r];
+}
+
+/** Suma todos los períodos de un recibo en un solo "pago" (para totales). */
+export function pagoCombinado(r) {
+  const filas = filasRecibo(r);
+  const sum = (k) => filas.reduce((a, f) => a + Number(f[k] || 0), 0);
+  return {
+    ...r,
+    monto_alquiler: sum("monto_alquiler"), monto_mora: sum("monto_mora"), monto_multa: sum("monto_multa"),
+    bonificacion: sum("bonificacion"), recargo: sum("recargo"), a_favor: sum("a_favor"), monto_total: sum("monto_total"),
+    conceptos: filas.flatMap((f) => (Array.isArray(f.conceptos) ? f.conceptos : [])),
+  };
+}
+
+/** "Septiembre 2026" o "Septiembre 2026 a Noviembre 2026 (3 meses)". */
+export function periodosDeRecibo(r) {
+  const pers = [...new Set(filasRecibo(r).map((f) => f.periodo))].sort();
+  if (pers.length <= 1) return periodoTexto(pers[0] || r.periodo);
+  const seguidos = pers.every((p, i) => i === 0 || sumarMeses(pers[i - 1], 1) === p);
+  if (seguidos) return `${periodoTexto(pers[0])} a ${periodoTexto(pers[pers.length - 1])} (${pers.length} meses)`;
+  return `${pers.slice(0, -1).map(periodoTexto).join(", ")} y ${periodoTexto(pers[pers.length - 1])}`;
+}
+
 function mitadRecibo(r, cfg, copia) {
   const c = r.contratos || {};
   const inq = c.inquilinos || {};
   const inm = c.inmuebles || {};
   const prop = inm.propietarios || {};
-  const t = totalesRecibo(r);
-  const mes = c.fecha_inicio && c.fecha_fin ? mesDeContrato(c.fecha_inicio, c.fecha_fin, r.periodo) : null;
-  const periodo = periodoTexto(r.periodo);
+  const t = totalesRecibo(pagoCombinado(r));
+  const variosMeses = new Set(filasRecibo(r).map((f) => f.periodo)).size > 1;
+  const periodo = periodosDeRecibo(r);
   const direccion = [inm.direccion, inm.piso_depto].filter(Boolean).join(" ");
   const logo = cfg.recibo_logo || "logo-carranza.png";
-  const filas = [
-    `<tr><td><b>Alquiler</b></td><td>${esc(periodo)}${mes ? ` <span class="rm-mes">mes ${mes.mes}/${mes.total}</span>` : ""}</td>
-      <td class="num">${n0(t.alquiler)}</td><td class="num">${n0(t.interes)}</td><td class="num">${n0(t.multa)}</td><td class="num"><b>${n0(t.alquiler + t.interes + t.multa)}</b></td></tr>`,
-    ...t.conceptos.map(
-      (x) => `<tr><td>${esc(x.concepto || "")}</td><td>${esc(periodo)}</td><td class="num">${n0(x.monto)}</td><td class="num">—</td><td class="num">—</td><td class="num"><b>${n0(x.monto)}</b></td></tr>`
-    ),
-  ].join("");
+  const filas = filasRecibo(r)
+    .flatMap((f) => {
+      const per = periodoTexto(f.periodo);
+      const mes = c.fecha_inicio && c.fecha_fin ? mesDeContrato(c.fecha_inicio, c.fecha_fin, f.periodo) : null;
+      const alq = Number(f.monto_alquiler || 0), int = Number(f.monto_mora || 0), mul = Number(f.monto_multa || 0);
+      return [
+        `<tr><td><b>Alquiler</b></td><td>${esc(per)}${mes ? ` <span class="rm-mes">mes ${mes.mes}/${mes.total}</span>` : ""}</td>
+      <td class="num">${n0(alq)}</td><td class="num">${n0(int)}</td><td class="num">${n0(mul)}</td><td class="num"><b>${n0(alq + int + mul)}</b></td></tr>`,
+        ...(Array.isArray(f.conceptos) ? f.conceptos : []).map(
+          (x) => `<tr><td>${esc(x.concepto || "")}</td><td>${esc(x.periodo ? periodoTexto(x.periodo) : per)}</td><td class="num">${n0(x.monto)}</td><td class="num">—</td><td class="num">—</td><td class="num"><b>${n0(x.monto)}</b></td></tr>`
+        ),
+      ];
+    })
+    .join("");
+  const atrasos = filasRecibo(r).filter((f) => f.dias_mora > 0);
+  const cantFilas = (filas.match(/<tr>/g) || []).length;
   const ajustes = [
     t.bonificacion ? `<div><span>Bonificación</span><span>- ${n0(t.bonificacion)}</span></div>` : "",
     t.recargo ? `<div><span>Recargo</span><span>${n0(t.recargo)}</span></div>` : "",
@@ -85,7 +120,7 @@ function mitadRecibo(r, cfg, copia) {
       <div class="rm-dato rm-full"><label>Propiedad</label><b>${inm.codigo != null ? `<span class="rm-cod">${esc(inm.codigo)}</span> ` : ""}${esc(direccion)}</b>${inm.localidad ? `<small>${esc(inm.localidad)}</small>` : ""}</div>
       <div class="rm-dato rm-full"><label>Por cuenta y orden de</label><b>${esc(prop.nombre || "")}</b></div>
     </div>
-    <table class="rm-tabla">
+    <table class="rm-tabla${cantFilas > 6 ? " rm-compacta" : ""}">
       <thead><tr><th>Concepto</th><th>Período</th><th class="num">Importe</th><th class="num">Interés</th><th class="num">Multa</th><th class="num">Total</th></tr></thead>
       <tbody>${filas}</tbody>
     </table>
@@ -99,8 +134,9 @@ function mitadRecibo(r, cfg, copia) {
     </div>
     <div class="rm-letras">Son pesos ${montoEnLetras(t.total).toLowerCase().replace(" cts.", "")}</div>
     <div class="rm-extra">
-      ${r.dias_mora > 0 ? `<div>Pagado con ${esc(r.dias_mora)} días de atraso.</div>` : ""}
-      ${r.notas ? `<div><b>Observaciones:</b> ${esc(r.notas)}</div>` : ""}
+      ${!variosMeses && r.dias_mora > 0 ? `<div>Pagado con ${esc(r.dias_mora)} días de atraso.</div>` : ""}
+      ${variosMeses && atrasos.length ? `<div>Atraso: ${atrasos.map((f) => `${esc(periodoTexto(f.periodo).toLowerCase())} ${esc(f.dias_mora)} días`).join(" · ")}.</div>` : ""}
+      ${filasRecibo(r).map((f) => f.notas).filter(Boolean).filter((x, i, a) => a.indexOf(x) === i).map((n) => `<div><b>Observaciones:</b> ${esc(n)}</div>`).join("")}
       ${cfg.recibo_leyenda ? `<div class="rm-leyenda">${esc(cfg.recibo_leyenda)}</div>` : ""}
     </div>
     <div class="rm-pie">

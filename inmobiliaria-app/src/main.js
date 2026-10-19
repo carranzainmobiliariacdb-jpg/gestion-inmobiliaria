@@ -3,7 +3,7 @@ import {
   montoEnLetras, telefonoWhatsapp, enlaceWhatsapp, completarPlantilla, primerNombre, serieIpcCompleta, calcularIpc,
 } from "./util.js";
 import { leerCodigoDni, interpretarCodigoDni, leerMrzDni, comprimirFoto, calcularCuil } from "./dni.js";
-import { htmlRecibo, htmlLiquidacion, htmlActaFotos, totalesRecibo, totalesLiquidacion } from "./documentos.js";
+import { htmlRecibo, htmlLiquidacion, htmlActaFotos, totalesRecibo, totalesLiquidacion, pagoCombinado, periodosDeRecibo } from "./documentos.js";
 import { VARIABLES as VARIABLES_MODELO, MODELOS_BASE, valoresContrato, completarModelo, htmlParaWord } from "./modelos.js";
 
 const invoke = window.__TAURI__.core.invoke;
@@ -2423,6 +2423,17 @@ $("aum-aplicar-todos").addEventListener("click", async () => {
 
 // ---------- COBROS (pagos / recibos) ----------
 
+/** Agrupa los pagos por recibo: un cobro de varios meses es un solo recibo con varias filas. */
+function recibosAgrupados(pagos) {
+  const grupos = new Map();
+  for (const p of pagos) {
+    const k = esCargaInicial(p) ? `id-${p.id}` : `${p.contrato_id}-${p.numero_recibo}`;
+    if (!grupos.has(k)) grupos.set(k, []);
+    grupos.get(k).push(p);
+  }
+  return [...grupos.values()].map((filas) => filas.sort((a, b) => a.periodo.localeCompare(b.periodo)));
+}
+
 function renderPagos() {
   const tbody = $("tbl-pagos");
   const sel = $("filtro-pagos-mes");
@@ -2430,22 +2441,34 @@ function renderPagos() {
   const elegido = sel.value || "";
   sel.innerHTML = `<option value="">Todos los meses</option>` + meses.map((m) => `<option value="${m}" ${m === elegido ? "selected" : ""}>Cobrados en ${periodoTitulo(m)}</option>`).join("");
   const liquidados = new Map(state.liquidaciones.map((l) => [l.pago_id, l.numero_comprobante]));
-  const lista = state.pagos.filter((p) => !elegido || p.fecha_pago.startsWith(elegido)).sort((a, b) => b.numero_recibo - a.numero_recibo);
+  const lista = recibosAgrupados(state.pagos.filter((p) => !elegido || p.fecha_pago.startsWith(elegido))).sort((a, b) => b[0].numero_recibo - a[0].numero_recibo);
   if (!lista.length) {
     tbody.innerHTML = vacio(8, "No hay cobros registrados");
     return;
   }
   tbody.innerHTML = lista
-    .map((p) => {
+    .map((filas) => {
+      const p = filas[0];
       const c = byId(state.contratos, p.contrato_id);
-      const liq = liquidados.get(p.id);
+      const liqs = [...new Set(filas.map((f) => liquidados.get(f.id)).filter(Boolean))];
+      const todasLiq = filas.every((f) => liquidados.has(f.id));
+      const total = filas.reduce((a, f) => a + Number(f.monto_total || 0), 0);
+      const maxAtraso = Math.max(...filas.map((f) => f.dias_mora || 0));
+      const periodos = filas.length > 1 ? `${filas.map((f) => periodoTitulo(f.periodo)).join("<br/>")}<span class="sub-line">${filas.length} meses en un recibo</span>` : periodoTitulo(p.periodo);
+      const liqHtml = todasLiq
+        ? `<span class="pill pill-ok">N° ${liqs.join(", ")}</span>`
+        : esCargaInicial(p)
+          ? '<span class="pill pill-gris">Fuera de la app</span>'
+          : liqs.length
+            ? `<span class="pill pill-warning">Parcial (N° ${liqs.join(", ")})</span>`
+            : '<span class="pill pill-warning">Pendiente</span>';
       return `<tr>
       <td><b>${esCargaInicial(p) ? "—" : p.numero_recibo}</b></td><td>${fmtDate(p.fecha_pago)}</td>
       <td>${c ? `${codHtml(c.inmueble_codigo)}${esc(c.inmueble_direccion)}<span class="sub-line">${esc(c.inquilino_nombre)}</span>` : "(contrato eliminado)"}</td>
-      <td>${periodoTitulo(p.periodo)}</td><td>${esc(p.metodo_pago || "-")}</td>
-      <td class="num"><b>${money(p.monto_total)}</b>${p.dias_mora > 0 ? `<span class="sub-line">${p.dias_mora} días de atraso</span>` : ""}</td>
-      <td>${liq ? `<span class="pill pill-ok">N° ${liq}</span>` : esCargaInicial(p) ? '<span class="pill pill-gris">Fuera de la app</span>' : '<span class="pill pill-warning">Pendiente</span>'}</td>
-      <td class="actions">${esCargaInicial(p) ? '<span class="sub-line">Carga inicial</span>' : `<button class="btn-link" data-recibo="${p.id}">Ver recibo</button>`}<button class="btn-link peligro" data-del-pago="${p.id}">Anular</button></td></tr>`;
+      <td>${periodos}</td><td>${esc(p.metodo_pago || "-")}</td>
+      <td class="num"><b>${money(total)}</b>${maxAtraso > 0 ? `<span class="sub-line">${maxAtraso} días de atraso</span>` : ""}</td>
+      <td>${liqHtml}</td>
+      <td class="actions">${esCargaInicial(p) ? '<span class="sub-line">Carga inicial</span>' : `<button class="btn-link" data-recibo="${p.id}">Ver recibo</button>`}<button class="btn-link peligro" data-del-pago="${filas.map((f) => f.id).join(",")}">Anular</button></td></tr>`;
     })
     .join("");
   aplicarBusqueda("tbl-pagos");
@@ -2455,9 +2478,11 @@ $("btn-nuevo-pago").addEventListener("click", () => abrirCobro());
 $("tbl-pagos").addEventListener("click", async (e) => {
   const b = e.target.closest("button");
   if (!b?.dataset.delPago) return;
-  if (!confirm("¿Anular (eliminar) este cobro? También se borra de la liquidación si ya estaba liquidado.")) return;
-  await call("eliminar_pago", { id: Number(b.dataset.delPago) });
-  toast("Cobro anulado");
+  const ids = b.dataset.delPago.split(",").map(Number);
+  const msg = ids.length > 1 ? `¿Anular (eliminar) este recibo con ${ids.length} meses? Se borran todos sus meses, también de la liquidación si ya estaban liquidados.` : "¿Anular (eliminar) este cobro? También se borra de la liquidación si ya estaba liquidado.";
+  if (!confirm(msg)) return;
+  for (const id of ids) await call("eliminar_pago", { id });
+  toast(ids.length > 1 ? `Recibo anulado (${ids.length} meses)` : "Cobro anulado");
   await loadAll();
 });
 
@@ -2484,7 +2509,9 @@ function textoFormaPago(metodo, d) {
   return "Efectivo";
 }
 
-/** Abre el formulario de cobro. contratoId/periodo opcionales (desde el tablero). */
+/** Abre el formulario de cobro. contratoId/periodo opcionales (desde el tablero).
+ *  Se pueden marcar varios períodos: se registra una fila por mes, todas con el
+ *  mismo número de recibo, y sale un solo recibo con el detalle de cada mes. */
 async function abrirCobro(contratoId = null, periodo = null) {
   const activos = contratosActivos().sort((a, b) => (a.inmueble_codigo || 1e9) - (b.inmueble_codigo || 1e9));
   if (!activos.length) return toast("No hay contratos activos", true);
@@ -2497,7 +2524,9 @@ async function abrirCobro(contratoId = null, periodo = null) {
           <div class="form-field full"><label>Contrato <span class="req">*</span></label>
             <input type="text" id="cb-buscar" placeholder="Buscar por dirección, código o inquilino…" style="margin-bottom:6px" />
             <select id="cb-contrato" size="1">${opciones}</select></div>
-          <div class="form-field"><label>Período que paga</label><input type="month" id="cb-periodo" /></div>
+          <div class="form-field full"><label>Períodos que paga <small class="field-hint">— marcá uno o varios meses (atrasados o adelantados)</small></label>
+            <div class="cb-meses" id="cb-meses"></div>
+            <div class="cb-otro-mes"><span>Otro mes:</span><input type="month" id="cb-otro" /><button type="button" class="btn-secondary btn-sm" id="cb-otro-add">+ Agregar</button></div></div>
           <div class="form-field"><label>Fecha de pago</label><input type="date" id="cb-fecha" value="${hoy}" /></div>
           <div class="form-field full"><label>Forma de pago</label>
             <div class="pago-opciones" id="cb-metodo-opc">
@@ -2507,9 +2536,8 @@ async function abrirCobro(contratoId = null, periodo = null) {
               <button type="button" class="pago-op" data-metodo="Otro">··· Otro</button>
             </div>
             <div class="form-grid tres pago-detalle" id="cb-metodo-detalle"></div></div>
-          <div class="form-field"><label>Alquiler ($)</label><input type="number" step="any" id="cb-alquiler" /></div>
-          <div class="form-field"><label>Intereses por atraso ($)</label><input type="number" step="any" id="cb-interes" /><small class="field-hint" id="cb-interes-hint"></small></div>
-          <div class="form-field"><label>Multa ($)</label><input type="number" step="any" id="cb-multa" /></div>
+          <div class="form-section">Alquiler de cada mes</div>
+          <div class="form-field full" id="cb-tabla-meses"></div>
           <div class="form-section">Otros conceptos (expensas, servicios, etc.)</div>
           <div class="form-field full" id="cb-conceptos-wrap"></div>
           <div class="form-field"><label>Bonificación / descuento ($)</label><input type="number" step="any" id="cb-bonif" value="0" /></div>
@@ -2522,50 +2550,136 @@ async function abrirCobro(contratoId = null, periodo = null) {
     </div>`;
   let actualizaciones = [];
   let c = null;
+  let elegidos = []; // períodos marcados, ordenados
+  const valores = new Map(); // período -> { alq, int, mul }
+  let autoConceptos = new Set(); // líneas generadas solas a partir de conceptos_fijos
 
   const montoPara = (venc) => {
     const vig = actualizaciones.filter((a) => a.fecha_vigencia <= venc).sort((a, b) => b.fecha_vigencia.localeCompare(a.fecha_vigencia))[0];
     return vig ? vig.monto_nuevo : c.monto_inicial;
   };
-
-  const recalcular = (desdeCero) => {
-    if (!c) return;
-    const per = $("cb-periodo").value;
-    const fecha = $("cb-fecha").value || hoy;
-    if (!per) return;
+  const calcular = (per) => {
     const venc = vencimientoDe(per, c.dia_pago);
-    const dias = Math.max(0, diasEntre(venc, fecha));
-    if (desdeCero) {
-      const alq = montoPara(venc);
-      $("cb-alquiler").value = alq;
-      $("cb-interes").value = (Math.round(alq * (c.tasa_mora_diaria / 100) * dias * 100) / 100).toFixed(2);
-      $("cb-multa").value = (Math.round((c.multa_diaria || 0) * dias * 100) / 100).toFixed(2);
+    const dias = Math.max(0, diasEntre(venc, $("cb-fecha").value || hoy));
+    const alq = montoPara(venc);
+    return { alq, int: Math.round(alq * (c.tasa_mora_diaria / 100) * dias * 100) / 100, mul: Math.round((c.multa_diaria || 0) * dias * 100) / 100 };
+  };
+
+  /** Meses para elegir: los impagos desde el inicio (o desde "liquidado hasta") hasta 3 meses adelante. */
+  const mesesCandidatos = () => {
+    const desdeLiq = c.liquidado_hasta ? sumarMeses(c.liquidado_hasta, 1) : null;
+    let p = c.fecha_inicio.slice(0, 7);
+    if (desdeLiq && desdeLiq > p) p = desdeLiq;
+    const fin = c.fecha_fin.slice(0, 7);
+    const tope = sumarMeses(hoy.slice(0, 7), 3);
+    const lista = [];
+    while (p <= fin && p <= tope) {
+      if (!pagoDelPeriodo(c.id, p)) lista.push(p);
+      p = sumarMeses(p, 1);
     }
-    $("cb-interes-hint").textContent = dias > 0 ? `${dias} días de atraso (vencía el ${fmtDate(venc)}) · ${numero(c.tasa_mora_diaria)}% diario` : `Sin atraso (vence el ${fmtDate(venc)})`;
-    const p = {
-      monto_alquiler: Number($("cb-alquiler").value || 0),
-      monto_mora: Number($("cb-interes").value || 0),
-      monto_multa: Number($("cb-multa").value || 0),
-      conceptos: leerLineas("cb-conceptos"),
-      bonificacion: Number($("cb-bonif").value || 0),
-      recargo: Number($("cb-recargo").value || 0),
-      a_favor: Number($("cb-afavor").value || 0),
-    };
-    const t = totalesRecibo(p);
-    const mes = mesDeContrato(c.fecha_inicio, c.fecha_fin, per);
-    const ya = pagoDelPeriodo(c.id, per);
+    return [...new Set([...lista, ...elegidos])].sort();
+  };
+
+  const pintarMeses = () => {
+    const hoyP = hoy.slice(0, 7);
+    $("cb-meses").innerHTML =
+      mesesCandidatos()
+        .map((p) => {
+          const pagado = pagoDelPeriodo(c.id, p);
+          const tipo = pagado ? "pagado" : p < hoyP ? "atrasado" : p === hoyP ? "actual" : "adelanto";
+          return `<label class="cb-mes cb-mes-${tipo} ${elegidos.includes(p) ? "marcado" : ""}"><input type="checkbox" data-mes="${p}" ${elegidos.includes(p) ? "checked" : ""} />${periodoTitulo(p)}<small>${pagado ? "ya cobrado" : tipo === "atrasado" ? "atrasado" : tipo === "actual" ? "este mes" : "adelanto"}</small></label>`;
+        })
+        .join("") || '<span class="sub-line">No hay meses pendientes: usá "Otro mes".</span>';
+  };
+
+  const pintarTablaMeses = () => {
+    $("cb-tabla-meses").innerHTML = elegidos.length
+      ? `<table class="cb-tabla"><thead><tr><th>Período</th><th>Vence</th><th>Atraso</th><th>Alquiler ($)</th><th>Intereses ($)</th><th>Multa ($)</th></tr></thead><tbody>${elegidos
+          .map((p) => {
+            const v = valores.get(p);
+            const venc = vencimientoDe(p, c.dia_pago);
+            const dias = Math.max(0, diasEntre(venc, $("cb-fecha").value || hoy));
+            const mes = mesDeContrato(c.fecha_inicio, c.fecha_fin, p);
+            return `<tr data-fila="${p}"><td><b>${periodoTitulo(p)}</b><br/><small class="field-hint">mes ${mes.mes}/${mes.total}</small></td><td>${fmtDate(venc)}</td><td>${dias > 0 ? `<span class="pill pill-warning">${dias} días</span>` : "—"}</td>
+              <td><input type="number" step="any" data-v="alq" value="${v.alq}" /></td><td><input type="number" step="any" data-v="int" value="${Number(v.int).toFixed(2)}" /></td><td><input type="number" step="any" data-v="mul" value="${Number(v.mul).toFixed(2)}" /></td></tr>`;
+          })
+          .join("")}</tbody></table><small class="field-hint">Intereses: ${numero(c.tasa_mora_diaria)}% diario sobre el alquiler, contando desde el vencimiento de cada mes hasta la fecha de pago.</small>`
+      : '<span class="sub-line">Marcá al menos un período arriba.</span>';
+  };
+
+  /** Regenera las líneas de conceptos fijos (una por mes) sin perder las que agregó a mano. */
+  const pintarConceptos = () => {
+    const fijos = c.conceptos_fijos || [];
+    const manuales = $("cb-conceptos") ? leerLineas("cb-conceptos").filter((l) => !autoConceptos.has(l.concepto)) : [];
+    const auto = elegidos.length > 1 ? elegidos.flatMap((p) => fijos.map((f) => ({ ...f, concepto: `${f.concepto} ${periodoTitulo(p)}` }))) : fijos.map((f) => ({ ...f }));
+    autoConceptos = new Set(auto.map((l) => l.concepto));
+    $("cb-conceptos-wrap").innerHTML = lineasHtml("cb-conceptos", [...auto, ...manuales]);
+  };
+
+  const cambiarMeses = (nuevos) => {
+    elegidos = [...new Set(nuevos)].sort();
+    for (const p of elegidos) if (!valores.has(p)) valores.set(p, calcular(p));
+    pintarMeses();
+    pintarTablaMeses();
+    pintarConceptos();
+    recalcular();
+  };
+
+  const leerValores = () => {
+    document.querySelectorAll("#cb-tabla-meses tr[data-fila]").forEach((tr) => {
+      const v = valores.get(tr.dataset.fila);
+      tr.querySelectorAll("[data-v]").forEach((i) => (v[i.dataset.v] = Number(i.value || 0)));
+    });
+  };
+
+  /** Arma las filas a registrar: una por período; cada concepto va al mes que nombra
+   *  (o al primero), y bonificación/recargo/a favor/observaciones van en el primero. */
+  const armarPagos = () => {
+    leerValores();
+    const conceptos = leerLineas("cb-conceptos");
+    const porMes = new Map(elegidos.map((p) => [p, []]));
+    for (const l of conceptos) {
+      const p = elegidos.length > 1 ? elegidos.find((x) => l.concepto.endsWith(` ${periodoTitulo(x)}`)) : null;
+      if (p) porMes.get(p).push({ ...l, concepto: l.concepto.slice(0, -(periodoTitulo(p).length + 1)) });
+      else porMes.get(elegidos[0]).push(l);
+    }
+    return elegidos.map((p, i) => {
+      const v = valores.get(p);
+      return {
+        contrato_id: c.id, periodo: p, fecha_pago: $("cb-fecha").value || hoy, metodo_pago: leerFormaPago(),
+        notas: i === 0 ? $("cb-notas").value.trim() || null : null,
+        monto_alquiler: v.alq, monto_mora: v.int, monto_multa: v.mul, conceptos: porMes.get(p),
+        bonificacion: i === 0 ? Number($("cb-bonif").value || 0) : 0,
+        recargo: i === 0 ? Number($("cb-recargo").value || 0) : 0,
+        a_favor: i === 0 ? Number($("cb-afavor").value || 0) : 0,
+        usuario: usuarioNombre(),
+      };
+    });
+  };
+
+  const recalcular = () => {
+    if (!c) return;
+    if (!elegidos.length) {
+      $("cb-resumen").innerHTML = "<h3>Resumen del recibo</h3><p class=\"sub-line\">Marcá al menos un período.</p>";
+      modalInfo.innerHTML = "";
+      return;
+    }
+    const pagos = armarPagos();
+    const r = pagoCombinado({ filas: pagos });
+    const t = totalesRecibo(r);
     const ult = pagosDe(c.id).sort((a, b) => b.periodo.localeCompare(a.periodo))[0];
+    const yaCobrados = elegidos.map((p) => [p, pagoDelPeriodo(c.id, p)]).filter(([, x]) => x);
     $("cb-resumen").innerHTML = `
       <h3>Resumen del recibo</h3>
       <div class="res-ctx">
         <b>${esc(c.inquilino_nombre)}</b>${c.inquilino_dni ? ` · DNI ${esc(c.inquilino_dni)}` : ""}<br/>
         ${codHtml(c.inmueble_codigo)}${esc(c.inmueble_direccion)}<br/>
         Propietario: ${esc(c.propietario_nombre)}<br/>
-        Contrato N° ${esc(c.numero ?? c.id)} · ${periodoTitulo(per)} — Mes ${mes.mes}/${mes.total}<br/>
+        Contrato N° ${esc(c.numero ?? c.id)} · ${elegidos.length > 1 ? `<b>${elegidos.length} meses</b>: ${esc(periodosDeRecibo({ filas: pagos }))}` : periodoTitulo(elegidos[0])}<br/>
         Último pago: ${ult ? `${periodoTitulo(ult.periodo)} (${esCargaInicial(ult) ? "sin recibo" : "recibo " + ult.numero_recibo})` : "ninguno"}
-        ${ya ? `<br/><span class="pill pill-danger">Este período ya se cobró (recibo ${ya.numero_recibo})</span>` : ""}
+        ${yaCobrados.map(([p, x]) => `<br/><span class="pill pill-danger">${periodoTitulo(p)} ya se cobró (recibo ${x.numero_recibo})</span>`).join("")}
       </div>
-      <div class="res-fila"><span>Alquiler</span><span>${money(t.alquiler)}</span></div>
+      ${pagos.map((p) => `<div class="res-fila"><span>Alquiler ${periodoTitulo(p.periodo).toLowerCase()}</span><span>${money(p.monto_alquiler)}</span></div>`).join("")}
       ${t.interes ? `<div class="res-fila"><span>Intereses</span><span>${money(t.interes)}</span></div>` : ""}
       ${t.multa ? `<div class="res-fila"><span>Multa</span><span>${money(t.multa)}</span></div>` : ""}
       ${t.conceptos.map((x) => `<div class="res-fila"><span>${esc(x.concepto || "Concepto")}</span><span>${money(x.monto)}</span></div>`).join("")}
@@ -2574,16 +2688,18 @@ async function abrirCobro(contratoId = null, periodo = null) {
       ${t.aFavor ? `<div class="res-fila"><span>A favor</span><span>- ${money(t.aFavor)}</span></div>` : ""}
       <div class="res-fila total"><span>Total</span><span>${money(t.total)}</span></div>
       <div class="res-letras">Son pesos ${montoEnLetras(t.total).toLowerCase()}</div>`;
-    modalInfo.innerHTML = `Total a cobrar: <b class="total">${money(t.total)}</b>`;
+    modalInfo.innerHTML = `Total a cobrar${elegidos.length > 1 ? ` (${elegidos.length} meses)` : ""}: <b class="total">${money(t.total)}</b>`;
   };
 
   const elegirContrato = async (id, per = null) => {
     c = byId(state.contratos, Number(id));
     $("cb-contrato").value = c.id;
-    $("cb-periodo").value = per || periodoSugerido(c);
-    $("cb-conceptos-wrap").innerHTML = lineasHtml("cb-conceptos", c.conceptos_fijos || []);
     actualizaciones = await invoke("get_actualizaciones", { contratoId: c.id }).catch(() => []);
-    recalcular(true);
+    valores.clear();
+    elegidos = [];
+    autoConceptos = new Set();
+    $("cb-conceptos-wrap").innerHTML = "";
+    cambiarMeses([per || periodoSugerido(c)]);
   };
 
   openModal({
@@ -2617,39 +2733,40 @@ async function abrirCobro(contratoId = null, periodo = null) {
         $("cb-metodo-detalle").querySelector("input")?.focus();
       });
       pintarDetallePago("Efectivo");
-      $("cb-periodo").addEventListener("change", () => recalcular(true));
-      $("cb-fecha").addEventListener("change", () => recalcular(true));
+      $("cb-meses").addEventListener("change", (e) => {
+        const p = e.target.dataset.mes;
+        if (!p) return;
+        leerValores();
+        cambiarMeses(e.target.checked ? [...elegidos, p] : elegidos.filter((x) => x !== p));
+      });
+      $("cb-otro-add").addEventListener("click", () => {
+        const p = $("cb-otro").value;
+        if (!p) return toast("Elegí el mes", true);
+        leerValores();
+        cambiarMeses([...elegidos, p]);
+        $("cb-otro").value = "";
+      });
+      $("cb-fecha").addEventListener("change", () => {
+        for (const p of elegidos) valores.set(p, calcular(p));
+        pintarTablaMeses();
+        recalcular();
+      });
       $("cb-layout").addEventListener("input", (e) => {
-        if (["cb-periodo", "cb-fecha", "cb-buscar"].includes(e.target.id)) return;
-        recalcular(false);
+        if (["cb-fecha", "cb-buscar", "cb-otro"].includes(e.target.id) || e.target.dataset.mes) return;
+        recalcular();
       });
       elegirContrato(contratoId || activos[0].id, periodo);
       setTimeout(() => $("cb-buscar").focus(), 50);
     },
     onSave: async () => {
-      const per = $("cb-periodo").value;
-      if (!c || !per) throw new Error("Elegí el contrato y el período");
-      const ya = pagoDelPeriodo(c.id, per);
-      if (ya && !confirm(`${periodoTitulo(per)} ya tiene el recibo N° ${ya.numero_recibo}. ¿Registrar otro cobro igual (ej. pago parcial o servicios)?`)) return false;
-      const nuevo = {
-        contrato_id: c.id,
-        periodo: per,
-        fecha_pago: $("cb-fecha").value || hoy,
-        metodo_pago: leerFormaPago(),
-        notas: $("cb-notas").value.trim() || null,
-        monto_alquiler: Number($("cb-alquiler").value || 0),
-        monto_mora: Number($("cb-interes").value || 0),
-        monto_multa: Number($("cb-multa").value || 0),
-        conceptos: leerLineas("cb-conceptos"),
-        bonificacion: Number($("cb-bonif").value || 0),
-        recargo: Number($("cb-recargo").value || 0),
-        a_favor: Number($("cb-afavor").value || 0),
-        usuario: usuarioNombre(),
-      };
-      const id = await call("registrar_pago", { nuevo });
-      toast("Cobro registrado");
+      if (!c || !elegidos.length) throw new Error("Elegí el contrato y al menos un período");
+      const yaCobrados = elegidos.map((p) => [p, pagoDelPeriodo(c.id, p)]).filter(([, x]) => x);
+      if (yaCobrados.length && !confirm(`${yaCobrados.map(([p, x]) => `${periodoTitulo(p)} ya tiene el recibo N° ${x.numero_recibo}`).join("\n")}.\n¿Registrar otro cobro igual (ej. pago parcial o servicios)?`)) return false;
+      const nuevos = armarPagos();
+      const ids = await call("registrar_pagos", { nuevos });
+      toast(nuevos.length > 1 ? `Cobro de ${nuevos.length} meses registrado` : "Cobro registrado");
       await loadAll();
-      setTimeout(() => verRecibo(id), 0);
+      setTimeout(() => verRecibo(ids[0]), 0);
     },
   });
 }
@@ -2671,7 +2788,7 @@ async function verRecibo(pagoId) {
     whatsapp: async () => {
       const inq = r.contratos?.inquilinos || {};
       const inm = r.contratos?.inmuebles || {};
-      const datos = { ...datosBaseMensaje(), nombre: primerNombre(inq.nombre), monto: money(totalesRecibo(r).total), periodo: periodoTitulo(r.periodo).toLowerCase(), inmueble: inm.direccion, recibo: r.numero_recibo };
+      const datos = { ...datosBaseMensaje(), nombre: primerNombre(inq.nombre), monto: money(totalesRecibo(pagoCombinado(r)).total), periodo: periodosDeRecibo(r).toLowerCase(), inmueble: inm.direccion, recibo: r.numero_recibo };
       const nombreArchivo = `Recibo_N${r.numero_recibo}_${(inq.nombre || "").split(" ").slice(0, 2).join("_")}`;
       await enviarWhatsappConPdf({
         htmlDoc, apaisado: true, nombrePdf: nombreArchivo,
