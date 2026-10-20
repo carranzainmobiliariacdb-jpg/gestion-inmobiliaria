@@ -792,8 +792,11 @@ function avisosServicios() {
       telefono: c?.inquilino_telefono,
       nombre: c?.inquilino_nombre || (inm ? "Sin inquilino activo" : "Sin vincular"),
       motivo: !inm ? "Vincular a un inmueble" : !c ? "Sin contrato activo" : "",
-      detalle: `${inm ? codHtml(inm.codigo) : ""}${esc(lugar)}<span class="sub-line">${fu.icono} ${esc(fu.nombre || "")} ${esc(fu.empresa)} · ${fu.etiqueta} ${esc(f.cuenta)} · ${esc(periodosTexto(periodos))} · <b>${money(total)}</b>${primerVenc ? ` · venció ${fmtDate(primerVenc)}` : ""}</span>`,
-      mensaje: completarPlantilla(cfg("plantilla_servicio"), datos),
+      detalle: `${inm ? codHtml(inm.codigo) : ""}${esc(lugar)}<span class="sub-line">${fu.icono} ${esc(fu.nombre || "")} ${esc(fu.empresa)} · ${fu.etiqueta} ${esc(f.cuenta)} · ${f.referencia === "Carga manual" ? "deuda cargada a mano" : esc(periodosTexto(periodos))} · <b>${money(total)}</b>${primerVenc ? ` · ${f.referencia === "Carga manual" ? "revisado" : "venció"} ${fmtDate(primerVenc)}` : ""}</span>`,
+      mensaje:
+        f.referencia === "Carga manual"
+          ? `Hola ${datos.nombre}. Te escribimos de ${datos.inmobiliaria}: según la Municipalidad, el servicio de ${datos.servicio} de ${datos.inmueble} tiene deuda vencida por ${datos.monto} (consultado el ${datos.vencimiento}). Por favor regularizala para evitar recargos o el corte del servicio. Gracias.`
+          : completarPlantilla(cfg("plantilla_servicio"), datos),
     });
   }
   return out;
@@ -828,10 +831,10 @@ function panelServiciosHtml() {
       const conCuenta = new Set(state.inmuebles.map((i) => normCuenta(i[fu.campo])).filter(Boolean)).size;
       return `<div class="servicios-panel-fila">
       <div><b>${fu.icono} ${fu.nombre} — ${esc(fu.empresa)}</b>
-        <span class="sub-line">Se consulta cuenta por cuenta: la Municipalidad pide una verificación en cada consulta. ${conCuenta} cuentas cargadas en inmuebles${filas.length ? ` · ${filas.length} consultadas` : ""}.</span>
+        <span class="sub-line">Se revisa en tu navegador cuenta por cuenta (la Municipalidad pide una verificación) y el resultado se carga acá con un clic. ${conCuenta} cuentas cargadas en inmuebles${filas.length ? ` · ${filas.length} consultadas` : ""}.</span>
         <span class="sub-line" id="srv-estado-${s}">${esc(textoEstadoServicio(s))}</span>
       </div>
-      <div class="header-actions"><button class="btn-primary btn-sm" data-srv-agua="1">Consultar agua…</button></div>
+      <div class="header-actions"><button class="btn-primary btn-sm" data-srv-agua="1">Revisar agua…</button></div>
     </div>`;
     }
     return `<div class="servicios-panel-fila">
@@ -888,7 +891,9 @@ function renderServicios() {
     const docs = (f.documentos || [])
       .map((d) => {
         const v = venc.includes(d);
-        return `<span class="sub-line">${v ? "🔴" : "🟢"} ${esc(periodoTitulo(periodoMmAaaa(d.periodo)))} · ${money(d.importe)} · vence ${esc(d.vencimiento)}</span>`;
+        return d.periodo
+          ? `<span class="sub-line">${v ? "🔴" : "🟢"} ${esc(periodoTitulo(periodoMmAaaa(d.periodo)))} · ${money(d.importe)} · vence ${esc(d.vencimiento)}</span>`
+          : `<span class="sub-line">${v ? "🔴" : "🟢"} ${esc(d.tipo || "Deuda")} · ${money(d.importe)} · revisado ${esc(d.vencimiento)}</span>`;
       })
       .join("");
     const a = ai >= 0 ? avisos[ai] : null;
@@ -1142,6 +1147,27 @@ document.addEventListener("click", (e) => {
 
 // ---------- Agua (Municipalidad): consulta cuenta por cuenta ----------
 
+/** Copia un texto al portapapeles (con alternativa si el navegador no deja). */
+async function copiarTexto(t) {
+  try {
+    await navigator.clipboard.writeText(t);
+    return true;
+  } catch {
+    const ta = document.createElement("textarea");
+    ta.value = t;
+    document.body.appendChild(ta);
+    ta.select();
+    const ok = document.execCommand("copy");
+    ta.remove();
+    return ok;
+  }
+}
+
+/** "20/10/2026" de hoy (formato de vencimiento de los servicios). */
+const hoyDmy = () => hoyIso().split("-").reverse().join("/");
+
+/** Agua: la Municipalidad bloquea la lectura automática (verificación de Cloudflare),
+ *  así que se revisa en el navegador común y el resultado se carga acá con dos clics. */
 function abrirConsultaAgua() {
   const porCuenta = new Map();
   for (const i of [...state.inmuebles].sort((a, b) => String(a.direccion).localeCompare(String(b.direccion)))) {
@@ -1150,30 +1176,89 @@ function abrirConsultaAgua() {
     if (!porCuenta.has(n)) porCuenta.set(n, []);
     porCuenta.get(n).push(i);
   }
-  const filas = [...porCuenta.entries()].map(([n, inms]) => {
+  const estadoHtml = (n) => {
     const f = (state.servicios || []).find((x) => x.servicio === "agua" && normCuenta(x.cuenta) === n);
-    const venc = f ? docsVencidos(f) : [];
+    if (!f) return '<span class="muted">Sin revisar</span>';
+    const venc = docsVencidos(f);
     const deuda = venc.reduce((a, d) => a + Number(d.importe || 0), 0);
-    const estado = !f ? '<span class="muted">Sin consultar</span>' : venc.length ? `<span class="pill pill-danger">${money(deuda)} vencido</span>` : '<span class="pill pill-ok">Al día</span>';
-    return `<tr><td><b>${esc(n)}</b></td><td>${inms.map((i) => `${codHtml(i.codigo)}${esc(i.direccion)}${i.piso_depto ? " " + esc(i.piso_depto) : ""}`).join("<br/>")}</td>
-      <td>${estado}${f?.actualizado ? `<span class="sub-line">Consultado ${esc(f.actualizado)}</span>` : ""}</td>
-      <td class="actions">${f ? `<button class="btn-link" data-constancia="agua|${esc(n)}">PDF</button>` : ""}<button class="btn-secondary btn-sm" data-agua-cuenta="${esc(n)}">Consultar</button></td></tr>`;
+    return `${venc.length ? `<span class="pill pill-danger">${money(deuda)} vencido</span>` : f.error ? `<span class="pill pill-warning">Sin dato</span>` : '<span class="pill pill-ok">Al día</span>'}<span class="sub-line">Revisado ${esc(f.actualizado || "")}</span>`;
+  };
+  const filas = [...porCuenta.entries()].map(([n, inms]) => {
+    const tieneDato = (state.servicios || []).some((x) => x.servicio === "agua" && normCuenta(x.cuenta) === n);
+    return `<tr data-fila-agua="${esc(n)}">
+      <td><b>${esc(n)}</b></td>
+      <td>${inms.map((i) => `${codHtml(i.codigo)}${esc(i.direccion)}${i.piso_depto ? " " + esc(i.piso_depto) : ""}`).join("<br/>")}</td>
+      <td class="agua-estado">${estadoHtml(n)}</td>
+      <td class="agua-acciones">
+        <button class="btn-secondary btn-sm" data-agua-abrir="${esc(n)}" title="Abre la página en tu navegador y copia el N° de cuenta">🌐 Abrir y copiar</button>
+        <button class="btn-sm agua-ok" data-agua-aldia="${esc(n)}">✓ Al día</button>
+        <span class="agua-deuda"><input type="number" step="any" min="0" placeholder="Deuda $" data-agua-monto="${esc(n)}" /><button class="btn-sm agua-mal" data-agua-condeuda="${esc(n)}">Con deuda</button></span>
+        <button class="btn-link" data-constancia="agua|${esc(n)}" ${tieneDato ? "" : "hidden"}>PDF</button>
+      </td></tr>`;
   });
   openModal({
     title: "Agua — Municipalidad",
-    size: "wide",
+    size: "xl",
     sinGuardar: true,
-    html: `<div id="agua-cuerpo"><p class="hint">Al tocar «Consultar» se abre la página de la Municipalidad con la cuenta ya escrita. Hacé la verificación de Cloudflare y tocá «Aceptar»: la app lee la deuda, la guarda y te muestra la constancia para guardarla en PDF. La página de la Municipalidad queda abierta por si también querés guardarla tal cual (botón dorado arriba).</p>
-      <div class="toolbar"><input class="search" id="agua-otra" placeholder="Otra cuenta (N°)" style="max-width:200px" /><button class="btn-secondary btn-sm" id="agua-otra-btn">Consultar</button></div>
-      <div class="table-wrap"><table class="data-table"><thead><tr><th>Cuenta</th><th>Inmueble(s)</th><th>Estado</th><th></th></tr></thead><tbody>${filas.join("") || vacio(4, "Ningún inmueble tiene cargado el N° de cuenta de agua (campo «Agua» del inmueble).")}</tbody></table></div></div>`,
+    html: `<div id="agua-cuerpo">
+      <ol class="hint agua-pasos">
+        <li><b>🌐 Abrir y copiar</b>: se abre la página de la Municipalidad en tu navegador y el N° de cuenta queda copiado.</li>
+        <li>Ahí tocás <b>Servicio de Agua</b>, pegás la cuenta con <b>Ctrl+V</b>, hacés la verificación y <b>Aceptar</b>. Si querés guardar la página oficial: <b>Ctrl+P → Guardar como PDF</b>.</li>
+        <li>Volvés acá y marcás <b>✓ Al día</b>, o escribís el importe vencido y tocás <b>Con deuda</b>. Queda guardado, con constancia en <b>PDF</b> y aviso al inquilino.</li>
+      </ol>
+      <div class="toolbar"><input class="search" id="agua-buscar" placeholder="Buscar cuenta o dirección…" style="max-width:260px" /><input class="search" id="agua-otra" placeholder="Otra cuenta (N°)" style="max-width:160px" /><button class="btn-secondary btn-sm" id="agua-otra-btn">🌐 Abrir y copiar</button></div>
+      <div class="table-wrap"><table class="data-table"><thead><tr><th>Cuenta</th><th>Inmueble(s)</th><th>Último estado</th><th>Revisar y cargar</th></tr></thead><tbody>${filas.join("") || vacio(4, "Ningún inmueble tiene cargado el N° de cuenta de agua (campo «Agua» del inmueble).")}</tbody></table></div></div>`,
     onMount: () => {
-      $("agua-cuerpo").addEventListener("click", (e) => {
-        const b = e.target.closest("[data-agua-cuenta], #agua-otra-btn");
+      const cuerpo = $("agua-cuerpo");
+      const guardar = async (n, deuda) => {
+        const doc = deuda > 0 ? [{ periodo: "", tipo: "Deuda vencida (cargada a mano)", numero: "", importe: deuda, vencimiento: hoyDmy(), estado: "vencido" }] : [];
+        await call("guardar_servicios_estado", { servicio: "agua", filas: [{ cuenta: n, cliente: n, referencia: "Carga manual", titular: usuarioNombre() || "", documentos: doc }] });
+        state.servicios = await call("get_servicios_estado");
+        const tr = cuerpo.querySelector(`[data-fila-agua="${CSS.escape(n)}"]`);
+        if (tr) {
+          tr.querySelector(".agua-estado").innerHTML = estadoHtml(n);
+          tr.querySelector("[data-constancia]")?.removeAttribute("hidden");
+          tr.classList.add("agua-hecha");
+          const sig = tr.nextElementSibling?.querySelector("[data-agua-abrir]");
+          if (sig) sig.focus();
+        }
+        toast(deuda > 0 ? `Cuenta ${n}: deuda de ${money(deuda)} guardada` : `Cuenta ${n}: al día`);
+        actualizarBadges();
+        refrescarPanelServicios();
+      };
+      cuerpo.addEventListener("click", async (e) => {
+        const b = e.target.closest("button");
         if (!b) return;
-        const cuenta = b.id === "agua-otra-btn" ? $("agua-otra").value : b.dataset.aguaCuenta;
-        if (!normCuenta(cuenta)) return toast("Escribí el N° de cuenta", true);
-        closeModal();
-        revisarServicio("agua", { visible: true, cuenta: normCuenta(cuenta) }).catch(console.error);
+        if (b.dataset.aguaAbrir || b.id === "agua-otra-btn") {
+          const n = normCuenta(b.id === "agua-otra-btn" ? $("agua-otra").value : b.dataset.aguaAbrir);
+          if (!n) return toast("Escribí el N° de cuenta", true);
+          await copiarTexto(n);
+          await call("abrir_enlace", { url: "https://www.municipalidad.com/cbus/deuda" });
+          toast(`Cuenta ${n} copiada: en la página tocá «Servicio de Agua» y pegá con Ctrl+V`);
+          b.closest("tr")?.classList.add("agua-abierta");
+          if (b.id === "agua-otra-btn" && !cuerpo.querySelector(`[data-fila-agua="${CSS.escape(n)}"]`)) {
+            cuerpo.querySelector("tbody").insertAdjacentHTML("afterbegin", `<tr data-fila-agua="${esc(n)}" class="agua-abierta"><td><b>${esc(n)}</b></td><td><span class="sub-line">Cuenta sin inmueble</span></td><td class="agua-estado">${estadoHtml(n)}</td>
+              <td class="agua-acciones"><button class="btn-sm agua-ok" data-agua-aldia="${esc(n)}">✓ Al día</button><span class="agua-deuda"><input type="number" step="any" min="0" placeholder="Deuda $" data-agua-monto="${esc(n)}" /><button class="btn-sm agua-mal" data-agua-condeuda="${esc(n)}">Con deuda</button></span><button class="btn-link" data-constancia="agua|${esc(n)}" hidden>PDF</button></td></tr>`);
+          }
+        }
+        if (b.dataset.aguaAldia) await guardar(b.dataset.aguaAldia, 0);
+        if (b.dataset.aguaCondeuda) {
+          const n = b.dataset.aguaCondeuda;
+          const inp = cuerpo.querySelector(`[data-agua-monto="${CSS.escape(n)}"]`);
+          const monto = Number(inp?.value || 0);
+          if (!(monto > 0)) {
+            inp?.focus();
+            return toast("Escribí el importe vencido que muestra la Municipalidad", true);
+          }
+          await guardar(n, monto);
+        }
+      });
+      cuerpo.addEventListener("keydown", (e) => {
+        if (e.key === "Enter" && e.target.dataset.aguaMonto) cuerpo.querySelector(`[data-agua-condeuda="${CSS.escape(e.target.dataset.aguaMonto)}"]`)?.click();
+      });
+      $("agua-buscar").addEventListener("input", (e) => {
+        const q = e.target.value.trim().toLowerCase();
+        cuerpo.querySelectorAll("tr[data-fila-agua]").forEach((tr) => (tr.hidden = !!q && !tr.textContent.toLowerCase().includes(q)));
       });
     },
   });

@@ -544,3 +544,14 @@ small.muted { font-size: 12px; }
 .cs-fila-venc td { color: #8a1c13; }
 .doc-constancia .liq-tabla tfoot td { border-top: 1.5px solid #c39b4a; padding-top: 6px; }
 .cs-nota { font-size: 9.5px; color: #555; margin: 12px 0 0; }
+
+/* Agua: carga manual */
+.agua-pasos { margin: 0 0 10px; padding-left: 20px; line-height: 1.6; }
+.agua-acciones { white-space: nowrap; }
+.agua-acciones > * { vertical-align: middle; margin: 2px 3px 2px 0; }
+.agua-deuda { display: inline-flex; gap: 4px; }
+.agua-deuda input { width: 110px; padding: 5px 8px; }
+.agua-ok { background: #e8f5ed; border: 1px solid #2e7d4f; color: #1d5a37; font-weight: 600; border-radius: 8px; cursor: pointer; }
+.agua-mal { background: #fdecea; border: 1px solid #b42318; color: #8a1c13; font-weight: 600; border-radius: 8px; cursor: pointer; }
+tr.agua-abierta td:first-child { box-shadow: inset 3px 0 0 var(--gold); }
+tr.agua-hecha { background: #f6fbf7; }

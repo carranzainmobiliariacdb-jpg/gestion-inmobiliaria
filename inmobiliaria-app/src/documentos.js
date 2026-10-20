@@ -280,7 +280,7 @@ export function htmlConstanciaServicio({ f, servicio, empresa, fuente, inmuebles
       <div class="acta-datos">
         <div><label>Cuenta N°:</label> <b>${esc(f.cuenta)}</b></div>
         <div><label>Consultado:</label> <b>${esc(consultado)}</b></div>
-        <div><label>Titular en ${esc(empresa)}:</label> <b>${esc(f.titular || "-")}</b></div>
+        ${f.referencia === "Carga manual" ? "" : `<div><label>Titular en ${esc(empresa)}:</label> <b>${esc(f.titular || "-")}</b></div>`}
         <div><label>Inquilino:</label> <b>${esc(contrato?.inquilino_nombre || "-")}</b></div>
         <div style="grid-column:1/-1"><label>Inmueble:</label> <b>${inms || esc(f.direccion || "-")}</b></div>
       </div>
@@ -291,7 +291,7 @@ export function htmlConstanciaServicio({ f, servicio, empresa, fuente, inmuebles
              <tfoot><tr><td colspan="5"><b>Total a pagar</b></td><td class="num"><b>${n0(totalVenc + totalPorVencer)}</b></td></tr></tfoot></table>`
           : ""
       }
-      <p class="cs-nota">Datos leídos de ${esc(fuente)} el ${esc(consultado)}. Constancia interna de ${esc(cfg.inmobiliaria_nombre || "la inmobiliaria")}: el estado puede cambiar después de la consulta.</p>
+      <p class="cs-nota">${f.referencia === "Carga manual" ? `Revisado en ${esc(fuente)} y cargado a mano${f.titular ? ` por ${esc(f.titular)}` : ""} el ${esc(consultado)}.` : `Datos leídos de ${esc(fuente)} el ${esc(consultado)}.`} Constancia interna de ${esc(cfg.inmobiliaria_nombre || "la inmobiliaria")}: el estado puede cambiar después de la consulta.</p>
     </div>
     <div class="liq-pie">Impreso: ${fmtDate(hoy || hoyIso())}</div>
   </div>`;

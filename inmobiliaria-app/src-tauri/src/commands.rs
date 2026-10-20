@@ -1316,7 +1316,8 @@ pub fn abrir_enlace<R: tauri::Runtime>(app: tauri::AppHandle<R>, url: String) ->
         || url.starts_with("whatsapp://")
         || url.starts_with("https://web.whatsapp.com/")
         || url.starts_with("https://www.bcra.gob.ar/")
-        || url.starts_with("https://www.epec.com.ar/"))
+        || url.starts_with("https://www.epec.com.ar/")
+        || url.starts_with("https://www.municipalidad.com/cbus/"))
     {
         return Err("Enlace no permitido".to_string());
     }
