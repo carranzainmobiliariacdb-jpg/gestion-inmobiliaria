@@ -32,7 +32,18 @@
 
   function cuentaPedida() {
     var m = location.hash.match(/cuenta=([^&]+)/);
-    return m ? decodeURIComponent(m[1]) : "";
+    if (m) {
+      try { sessionStorage.setItem("__cuentaAgua", decodeURIComponent(m[1])); } catch (e) {}
+      return decodeURIComponent(m[1]);
+    }
+    try { return sessionStorage.getItem("__cuentaAgua") || ""; } catch (e) { return ""; }
+  }
+
+  // Mensaje de error de la propia Municipalidad (ej. «En estos momentos no se pueden recuperar los datos»).
+  function avisoMunicipalidad() {
+    var el = document.querySelector(".alert-danger, .alert-warning, .alert-error");
+    var t = texto(el);
+    return t && /atenci[oó]n|no se pued|error|intente/i.test(t) ? t.replace(/^Atenci[oó]n\s*/i, "").replace(/\.\s*$/, "") : "";
   }
 
   // ---- 1) Formulario: elegir «Servicio de Agua» y escribir la cuenta ----
@@ -106,7 +117,8 @@
       });
     }
     var sinDeuda = !tabla && /no (registra|posee|tiene|existe) deuda|sin deuda/i.test(document.body.textContent);
-    var resultado = { cuenta: cuenta, documentos: documentos, error: !(tabla || sinDeuda) };
+    var msjMuni = !tabla && !sinDeuda ? avisoMunicipalidad() : "";
+    var resultado = { cuenta: cuenta, documentos: documentos, error: !(tabla || sinDeuda), mensaje: msjMuni };
     reportar({
       estado: "fin",
       contratos: [
@@ -118,7 +130,7 @@
           referencia: celdasInfo["Documento"] || "",
           documentos: documentos,
           financiados: 0,
-          error: tabla || sinDeuda ? null : "No se encontró el listado de deuda en la página.",
+          error: tabla || sinDeuda ? null : msjMuni ? "La Municipalidad respondió: «" + msjMuni + "»." : "No se encontró el listado de deuda en la página.",
         },
       ],
     });
@@ -134,7 +146,9 @@
     b.setAttribute("style", "position:sticky;top:0;z-index:2147483647;display:flex;gap:12px;align-items:center;justify-content:space-between;padding:10px 16px;background:#15181e;color:#fff;font:14px Segoe UI,Arial,sans-serif;box-shadow:0 2px 8px rgba(0,0,0,.3)");
     b.innerHTML =
       (r.error
-        ? '<span>⚠ <b>Gestión Inmobiliaria</b> no encontró el listado de deuda de la cuenta ' + r.cuenta + ". Revisá la página; podés guardarla en PDF igual.</span>"
+        ? r.mensaje
+          ? '<span>⚠ La Municipalidad no devolvió la deuda' + (r.cuenta ? " de la cuenta " + r.cuenta : "") + ": «" + r.mensaje + "». Es un problema de su página: probá de nuevo más tarde. No se guardó nada.</span>"
+          : '<span>⚠ <b>Gestión Inmobiliaria</b> no encontró el listado de deuda' + (r.cuenta ? " de la cuenta " + r.cuenta : "") + ". Revisá la página; podés guardarla en PDF igual. No se guardó nada.</span>"
         : '<span>✓ <b>Gestión Inmobiliaria</b> ya guardó la deuda de la cuenta ' + r.cuenta + (r.documentos.length ? "" : " (sin deuda)") + ". La constancia en PDF está en la app.</span>") +
       '<span><button id="__pdfApp" style="background:#c39b4a;color:#15181e;border:0;border-radius:8px;padding:8px 14px;font-weight:700;cursor:pointer">Guardar esta página en PDF</button></span>';
     document.body.insertBefore(b, document.body.firstChild);

@@ -964,6 +964,14 @@ async function revisarServicio(servicio, { visible = false, cuenta = null } = {}
       terminar();
       // El agua deja abierta la página de la Municipalidad (para guardarla en PDF si se quiere).
       if (!fu.manual) invoke("servicio_cerrar", { servicio }).catch(console.error);
+      // Agua: si la Municipalidad no devolvió la deuda, no se pisa la última consulta buena.
+      const fallidas = (e.contratos || []).filter((x) => x.error);
+      if (fu.manual && fallidas.length && fallidas.length === (e.contratos || []).length) {
+        estadosServicio[servicio] = { estado: "inactivo" };
+        toast(`${fallidas[0].error} No se guardó nada; probá de nuevo más tarde.`, true);
+        refrescarPanelServicios();
+        return;
+      }
       try {
         await call("guardar_servicios_estado", { servicio, filas: e.contratos || [] });
         const ahora = new Date();
