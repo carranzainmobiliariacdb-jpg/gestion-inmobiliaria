@@ -47,6 +47,7 @@ const CONFIG_DEFECTO = {
   wa_codigo_area: "3468",
   wa_inmobiliaria: "3468563371",
   wa_modo: "app",
+  wa_pdf_auto: "enviar",
   wa_datos_pago: "",
   aviso_dias_antes: "5",
   plantilla_recordatorio:
@@ -516,6 +517,20 @@ async function enviarWhatsappConPdf({ htmlDoc, apaisado, nombrePdf, subcarpeta =
     state.recordatorios.unshift({ ...reg, id: Date.now() });
   } catch (e) {
     console.error(e);
+  }
+  // App de WhatsApp de la PC: pega el PDF en el chat y lo envía sola.
+  const auto = cfg("wa_pdf_auto") || "enviar";
+  if (ruta && (cfg("wa_modo") || "app") === "app" && auto !== "no") {
+    if (info) info.innerHTML = "📎 Adjuntando el PDF en el chat de WhatsApp… no toques el teclado unos segundos.";
+    try {
+      const r = await call("pegar_pdf_whatsapp", { enviar: auto === "enviar" });
+      const texto = r === "enviado" ? `✓ PDF enviado por WhatsApp a ${esc(nombre || "")}. Revisá el chat por las dudas.` : `📎 PDF pegado en el chat de ${esc(nombre || "")}: revisalo y tocá <b>Enviar</b> en WhatsApp.`;
+      if (info && !$("print-overlay").classList.contains("hidden")) info.innerHTML = `${texto}<br/>${botonesArchivo(ruta)}`;
+      else toast(r === "enviado" ? "PDF enviado por WhatsApp" : "PDF pegado en el chat: tocá Enviar en WhatsApp");
+      return true;
+    } catch (e) {
+      console.error(e);
+    }
   }
   if (ruta) {
     const web = cfg("wa_modo") === "web";
@@ -3535,6 +3550,9 @@ async function renderConfig() {
         <div class="form-field"><label>Abrir los chats en</label><select data-cfg="wa_modo">
           ${[["app", "App de WhatsApp de la PC (recomendado)"], ["web", "WhatsApp Web (navegador)"], ["wame", "Enlace wa.me (pregunta cada vez)"]].map(([v, l]) => `<option value="${v}" ${(cfgBorrador.wa_modo ?? cfg("wa_modo")) === v ? "selected" : ""}>${l}</option>`).join("")}
         </select></div>
+        <div class="form-field"><label>PDF de recibos y liquidaciones</label><select data-cfg="wa_pdf_auto">
+          ${[["enviar", "Adjuntarlo y enviarlo solo (recomendado)"], ["pegar", "Adjuntarlo y yo toco Enviar"], ["no", "Lo pego yo con Ctrl+V"]].map(([v, l]) => `<option value="${v}" ${(cfgBorrador.wa_pdf_auto ?? cfg("wa_pdf_auto")) === v ? "selected" : ""}>${l}</option>`).join("")}
+        </select><small class="field-hint">Funciona con la app de WhatsApp de la PC. Mientras se adjunta, no uses el teclado.</small></div>
         ${campoCfg("wa_codigo_area", "Característica por defecto", { hint: "Para teléfonos cargados sin característica (ej. 3468)" })}
         ${campoCfg("aviso_dias_antes", "Recordar el pago con (días de anticipación)", { type: "number" })}
         ${campoCfg("wa_datos_pago", "Datos para transferir (van en {datos_pago})", { full: true, type: "textarea", placeholder: "Alias: CARRANZA.INMO · CBU 0000… · Titular: …" })}

@@ -118,6 +118,7 @@ pub fn manejador<R: tauri::Runtime>() -> impl Fn(tauri::ipc::Invoke<R>) -> bool 
         pdf::mostrar_en_carpeta,
         pdf::abrir_pdf,
         pdf::elegir_carpeta,
+        pdf::pegar_pdf_whatsapp,
     ]
 }
 

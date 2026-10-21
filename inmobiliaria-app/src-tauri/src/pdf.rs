@@ -248,3 +248,69 @@ pub async fn elegir_carpeta<R: tauri::Runtime>(app: tauri::AppHandle<R>, actual:
     let elegido = rx.await.map_err(|e| e.to_string())?;
     Ok(elegido.and_then(|f| f.into_path().ok()).map(|p| p.to_string_lossy().to_string()))
 }
+
+
+/// Después de abrir el chat de WhatsApp de escritorio (con el PDF ya en el
+/// portapapeles), trae la ventana de WhatsApp adelante, pega el PDF (Ctrl+V)
+/// y, si `enviar`, aprieta Enter para mandarlo. Sólo actúa si la ventana que
+/// queda activa es la de WhatsApp. Devuelve "enviado", "pegado" o un error.
+#[tauri::command]
+pub async fn pegar_pdf_whatsapp(enviar: bool) -> Result<String, String> {
+    #[cfg(windows)]
+    {
+        let script = format!(
+            r#"
+Add-Type @"
+using System; using System.Runtime.InteropServices; using System.Text;
+public class Ventana {{
+  [DllImport("user32.dll")] public static extern IntPtr GetForegroundWindow();
+  [DllImport("user32.dll", CharSet=CharSet.Unicode)] public static extern int GetWindowText(IntPtr h, StringBuilder s, int n);
+  public static string Titulo() {{ var sb = new StringBuilder(256); GetWindowText(GetForegroundWindow(), sb, 256); return sb.ToString(); }}
+}}
+"@
+$w = New-Object -ComObject WScript.Shell
+$ok = $false
+for ($i = 0; $i -lt 30 -and -not $ok; $i++) {{
+  Start-Sleep -Milliseconds 400
+  $null = $w.AppActivate('WhatsApp')
+  $ok = ([Ventana]::Titulo() -like 'WhatsApp*') -and ([Ventana]::Titulo() -notlike '*Edge*') -and ([Ventana]::Titulo() -notlike '*Chrome*')
+}}
+if (-not $ok) {{ Write-Output 'sin-ventana'; exit 0 }}
+Start-Sleep -Milliseconds 2500
+if ([Ventana]::Titulo() -notlike 'WhatsApp*') {{ Write-Output 'sin-ventana'; exit 0 }}
+$w.SendKeys('^v')
+Start-Sleep -Milliseconds 2500
+if ({enviar}) {{
+  if ([Ventana]::Titulo() -notlike 'WhatsApp*') {{ Write-Output 'pegado'; exit 0 }}
+  $w.SendKeys('{{ENTER}}')
+  Start-Sleep -Milliseconds 2000
+  if ([Ventana]::Titulo() -like 'WhatsApp*') {{ $w.SendKeys('{{ENTER}}') }}
+  Write-Output 'enviado'
+}} else {{ Write-Output 'pegado' }}
+"#,
+            enviar = if enviar { "$true" } else { "$false" }
+        );
+        let salida = tauri::async_runtime::spawn_blocking(move || {
+            let mut cmd = Command::new("powershell");
+            cmd.args(["-NoProfile", "-NonInteractive", "-ExecutionPolicy", "Bypass", "-WindowStyle", "Hidden", "-Command", &script]);
+            use std::os::windows::process::CommandExt;
+            const CREATE_NO_WINDOW: u32 = 0x08000000;
+            cmd.creation_flags(CREATE_NO_WINDOW);
+            cmd.output()
+        })
+        .await
+        .map_err(|e| e.to_string())?
+        .map_err(|e| format!("No se pudo controlar WhatsApp: {}", e))?;
+        let r = String::from_utf8_lossy(&salida.stdout).trim().to_string();
+        match r.as_str() {
+            "enviado" | "pegado" => Ok(r),
+            "sin-ventana" => Err("No encontré la ventana de WhatsApp abierta".into()),
+            _ => Err(format!("No se pudo pegar el PDF: {}", String::from_utf8_lossy(&salida.stderr).lines().take(2).collect::<Vec<_>>().join(" "))),
+        }
+    }
+    #[cfg(not(windows))]
+    {
+        let _ = enviar;
+        Ok("pegado".into())
+    }
+}
