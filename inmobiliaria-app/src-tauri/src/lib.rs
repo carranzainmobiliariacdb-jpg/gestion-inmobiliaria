@@ -19,6 +19,7 @@ pub fn run() {
         .plugin(tauri_plugin_opener::init())
         .plugin(tauri_plugin_updater::Builder::new().build())
         .plugin(tauri_plugin_process::init())
+        .plugin(tauri_plugin_dialog::init())
         .setup(|app| {
             app.manage(DbState(RwLock::new(None)));
             app.manage(servicios::ServiciosState::default());
@@ -112,6 +113,11 @@ pub fn manejador<R: tauri::Runtime>() -> impl Fn(tauri::ipc::Invoke<R>) -> bool 
         carga::importar_carga_inicial,
         pdf::generar_pdf,
         pdf::copiar_pdf_portapapeles,
+        pdf::guardar_pdf,
+        pdf::carpeta_pdfs_por_defecto,
+        pdf::mostrar_en_carpeta,
+        pdf::abrir_pdf,
+        pdf::elegir_carpeta,
     ]
 }
 

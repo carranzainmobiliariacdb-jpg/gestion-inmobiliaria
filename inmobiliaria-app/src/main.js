@@ -344,11 +344,60 @@ $("print-close-2").addEventListener("click", cerrarPrint);
 $("print-now").addEventListener("click", () => window.print());
 $("print-whatsapp").addEventListener("click", () => printWhatsapp && printWhatsapp());
 
-function openPrint(html, { titulo = "Vista previa", apaisado = false, whatsapp = null } = {}) {
+// ---------- PDF en la carpeta de la inmobiliaria ----------
+
+/** Carpeta elegida en esta PC (vacío = Documentos\Carranza Inmobiliaria). */
+const carpetaPdfs = () => {
+  try {
+    return localStorage.getItem("carpeta_pdfs") || "";
+  } catch {
+    return "";
+  }
+};
+let printPdf = null; // { htmlDoc, apaisado, nombre, subcarpeta }
+const PRINT_INFO_DEFECTO = 'Para imprimir en papel usá <b>Imprimir</b>. <b>Guardar PDF</b> lo deja en tu carpeta de documentos.';
+
+/** Genera el PDF y lo guarda en carpeta/subcarpeta. Devuelve la ruta. */
+async function guardarPdfDocumento({ htmlDoc, apaisado, nombre, subcarpeta }) {
+  const html = await htmlAutocontenido(htmlDoc, !!apaisado);
+  return call("guardar_pdf", { html, nombre, carpeta: carpetaPdfs() || null, subcarpeta: subcarpeta || null });
+}
+
+function botonesArchivo(ruta) {
+  return `<button class="btn-link" data-pdf-abrir="${esc(ruta)}">Abrir</button> · <button class="btn-link" data-pdf-carpeta="${esc(ruta)}">Ver en la carpeta</button>`;
+}
+
+document.addEventListener("click", (e) => {
+  const b = e.target.closest("[data-pdf-abrir], [data-pdf-carpeta]");
+  if (!b) return;
+  if (b.dataset.pdfAbrir) invoke("abrir_pdf", { ruta: b.dataset.pdfAbrir }).catch((err) => toast(String(err), true));
+  if (b.dataset.pdfCarpeta) invoke("mostrar_en_carpeta", { ruta: b.dataset.pdfCarpeta }).catch((err) => toast(String(err), true));
+});
+
+$("print-pdf").addEventListener("click", async () => {
+  if (!printPdf) return;
+  const btn = $("print-pdf");
+  btn.disabled = true;
+  $("print-info").innerHTML = "Generando el PDF…";
+  try {
+    const ruta = await guardarPdfDocumento(printPdf);
+    $("print-info").innerHTML = `✓ Guardado: <b>${esc(ruta)}</b><br/>${botonesArchivo(ruta)}`;
+    toast("PDF guardado");
+  } catch (e) {
+    $("print-info").innerHTML = `⚠ ${esc(String(e))}`;
+  } finally {
+    btn.disabled = false;
+  }
+});
+
+function openPrint(html, { titulo = "Vista previa", apaisado = false, whatsapp = null, pdf = null } = {}) {
   $("page-style").textContent = `@page { size: A4 ${apaisado ? "landscape" : "portrait"}; margin: ${apaisado ? "8mm" : "10mm"}; }`;
   $("print-title").textContent = titulo;
   $("print-body").innerHTML = html;
   printWhatsapp = whatsapp;
+  printPdf = pdf ? { htmlDoc: html, apaisado, ...pdf } : null;
+  $("print-pdf").classList.toggle("hidden", !pdf);
+  $("print-info").innerHTML = pdf ? PRINT_INFO_DEFECTO : 'Para PDF elegí la impresora <b>"Microsoft Print to PDF"</b>.';
   $("print-whatsapp").classList.toggle("hidden", !whatsapp);
   $("print-now").classList.toggle("hidden", titulo.startsWith("DNI"));
   printOverlay.classList.remove("hidden");
@@ -435,22 +484,25 @@ async function htmlAutocontenido(cuerpo, apaisado) {
 ${pageRule}
 body { background:#fff; margin:0; }
 .print-body { box-shadow:none; margin:0; width:auto; }
-</style></head><body><div class="print-body">${html}</div></body></html>`;
+</style></head><body><div id="print-overlay"><div class="print-body">${html}</div></div></body></html>`;
 }
 
 /** Genera el PDF del documento que está en la vista previa, lo copia al
  *  portapapeles y abre el chat de WhatsApp con el mensaje. El usuario
  *  después aprieta Ctrl+V en el chat para adjuntar el PDF. */
-async function enviarWhatsappConPdf({ htmlDoc, apaisado, nombrePdf, telefono, nombre, contrato_id = null, tipo, referencia = null, mensaje }) {
+async function enviarWhatsappConPdf({ htmlDoc, apaisado, nombrePdf, subcarpeta = null, telefono, nombre, contrato_id = null, tipo, referencia = null, mensaje }) {
   const tel = telefonoWhatsapp(telefono, cfg("wa_codigo_area"));
   if (!tel) {
     toast(`${nombre || "La persona"} no tiene un teléfono válido cargado`, true);
     return false;
   }
   let ruta = null;
+  const info = $("print-info");
+  if (info) info.innerHTML = "Generando el PDF para WhatsApp…";
   try {
-    const htmlCompleto = await htmlAutocontenido(htmlDoc, !!apaisado);
-    ruta = await call("generar_pdf", { html: htmlCompleto, nombre: nombrePdf });
+    ruta = subcarpeta
+      ? await guardarPdfDocumento({ htmlDoc, apaisado, nombre: nombrePdf, subcarpeta })
+      : await call("generar_pdf", { html: await htmlAutocontenido(htmlDoc, !!apaisado), nombre: nombrePdf });
     await call("copiar_pdf_portapapeles", { ruta });
   } catch (e) {
     console.error("No se pudo generar / copiar el PDF:", e);
@@ -465,7 +517,15 @@ async function enviarWhatsappConPdf({ htmlDoc, apaisado, nombrePdf, telefono, no
   } catch (e) {
     console.error(e);
   }
-  if (ruta) toast("PDF listo en el portapapeles. En el chat de WhatsApp apretá Ctrl+V y Enter para adjuntarlo.");
+  if (ruta) {
+    const web = cfg("wa_modo") === "web";
+    if (web) invoke("mostrar_en_carpeta", { ruta }).catch(() => {});
+    const guia = web
+      ? `📎 <b>Para adjuntar el PDF:</b> arrastrá el archivo desde la carpeta que se abrió al chat de WhatsApp Web y tocá Enviar.`
+      : `📎 <b>Para adjuntar el PDF:</b> en el chat de WhatsApp hacé clic en el cuadro de mensaje, apretá <b>Ctrl+V</b> y después <b>Enter</b>. El PDF se envía con el mensaje como texto.`;
+    if (info && !$("print-overlay").classList.contains("hidden")) info.innerHTML = `${guia}<br/>Si no se pega: ${botonesArchivo(ruta)} y arrastralo al chat.`;
+    else toast(web ? "Arrastrá el PDF de la carpeta al chat de WhatsApp Web." : "PDF copiado: en el chat de WhatsApp apretá Ctrl+V y Enter para adjuntarlo.");
+  } else if (info) info.innerHTML = "";
   return true;
 }
 
@@ -1120,14 +1180,17 @@ function verConstanciaServicio(servicio, cuenta) {
     configCompleta()
   );
   const lugar = inmuebles[0]?.direccion || f.direccion || "";
+  const nombreConst = `Constancia_${fu.nombre}_${n}_${(f.actualizado || hoyIso()).slice(0, 10)}`;
+  const subConst = `Constancias servicios/${(f.actualizado || hoyIso()).slice(0, 7)}`;
   openPrint(htmlDoc, {
     titulo: `Constancia ${fu.nombre.toLowerCase()} — cuenta ${f.cuenta}`,
+    pdf: { nombre: nombreConst, subcarpeta: subConst },
     whatsapp: contrato
       ? async () => {
           const deuda = vencidos.reduce((a, d) => a + Number(d.importe || 0), 0);
           await enviarWhatsappConPdf({
             htmlDoc, apaisado: false,
-            nombrePdf: `Constancia_${fu.nombre}_${n}_${(f.actualizado || hoyIso()).slice(0, 10)}`,
+            nombrePdf: nombreConst, subcarpeta: subConst,
             telefono: contrato.inquilino_telefono, nombre: contrato.inquilino_nombre, contrato_id: contrato.id,
             tipo: "servicio", referencia: `constancia:${servicio}:${n}:${(f.actualizado || "").slice(0, 10)}`,
             mensaje: `Hola ${primerNombre(contrato.inquilino_nombre)}, te enviamos el estado del servicio de ${NOMBRE_SERVICIO[servicio]} de ${lugar} (cuenta ${f.cuenta}) consultado el ${f.actualizado}: ${vencidos.length ? `registra deuda vencida por ${money(deuda)}.` : "está al día."} ${cfg("inmobiliaria_nombre") || ""}`.trim(),
@@ -2176,6 +2239,7 @@ async function abrirFotosInmueble(inmuebleId) {
         const contrato = (cId && byId(state.contratos, cId)) || activo;
         openPrint(htmlActaFotos({ inmueble: inm, contrato, fotos: completas, tipo, fecha: completas[completas.length - 1].fecha }, configCompleta()), {
           titulo: `Acta de estado — ${tipo}`,
+          pdf: { nombre: `Acta_${tipo}_${inm.direccion || ""}_${hoyIso()}`, subcarpeta: "Actas de estado" },
         });
       });
       cargar();
@@ -2917,16 +2981,19 @@ async function verRecibo(pagoId) {
   const r = await call("get_recibo", { pagoId });
   const conf = configCompleta();
   const htmlDoc = htmlRecibo(r, conf);
+  const inqR = r.contratos?.inquilinos || {};
+  const nombreRecibo = `Recibo_N${String(r.numero_recibo).padStart(6, "0")}_${(inqR.nombre || "").split(" ").slice(0, 2).join("_")}`;
+  const subRecibo = `Recibos/${String(r.fecha_pago || hoyIso()).slice(0, 7)}`;
   openPrint(htmlDoc, {
     titulo: `Recibo N° ${r.numero_recibo}`,
     apaisado: true,
+    pdf: { nombre: nombreRecibo, subcarpeta: subRecibo },
     whatsapp: async () => {
       const inq = r.contratos?.inquilinos || {};
       const inm = r.contratos?.inmuebles || {};
       const datos = { ...datosBaseMensaje(), nombre: primerNombre(inq.nombre), monto: money(totalesRecibo(pagoCombinado(r)).total), periodo: periodosDeRecibo(r).toLowerCase(), inmueble: inm.direccion, recibo: r.numero_recibo };
-      const nombreArchivo = `Recibo_N${r.numero_recibo}_${(inq.nombre || "").split(" ").slice(0, 2).join("_")}`;
       await enviarWhatsappConPdf({
-        htmlDoc, apaisado: true, nombrePdf: nombreArchivo,
+        htmlDoc, apaisado: true, nombrePdf: nombreRecibo, subcarpeta: subRecibo,
         telefono: inq.telefono, nombre: inq.nombre, contrato_id: r.contrato_id,
         tipo: "recibo", referencia: String(r.numero_recibo),
         mensaje: completarPlantilla(cfg("plantilla_recibo"), datos),
@@ -3120,13 +3187,15 @@ async function verLiquidacion(numeroLiq) {
   const filas = await call("get_comprobante", { numero: numeroLiq });
   const prop = filas[0].pagos?.contratos?.inmuebles?.propietarios || {};
   const htmlDoc = htmlLiquidacion(filas, configCompleta());
+  const nombreArchivo = `Liquidacion_N${String(numeroLiq).padStart(6, "0")}_${(prop.nombre || "").split(" ").slice(0, 2).join("_")}`;
+  const subLiq = `Liquidaciones/${String(filas[0].fecha || hoyIso()).slice(0, 7)}`;
   openPrint(htmlDoc, {
     titulo: `Liquidación N° ${numeroLiq}`,
+    pdf: { nombre: nombreArchivo, subcarpeta: subLiq },
     whatsapp: async () => {
       const datos = { ...datosBaseMensaje(), nombre: primerNombre(prop.nombre), numero: numeroLiq, monto: money(totalesLiquidacion(filas).neto) };
-      const nombreArchivo = `Liquidacion_N${numeroLiq}_${(prop.nombre || "").split(" ").slice(0, 2).join("_")}`;
       await enviarWhatsappConPdf({
-        htmlDoc, apaisado: false, nombrePdf: nombreArchivo,
+        htmlDoc, apaisado: false, nombrePdf: nombreArchivo, subcarpeta: subLiq,
         telefono: prop.telefono, nombre: prop.nombre,
         tipo: "liquidacion", referencia: String(numeroLiq),
         mensaje: completarPlantilla(cfg("plantilla_liquidacion"), datos),
@@ -3470,6 +3539,9 @@ async function renderConfig() {
         ${campoCfg("aviso_dias_antes", "Recordar el pago con (días de anticipación)", { type: "number" })}
         ${campoCfg("wa_datos_pago", "Datos para transferir (van en {datos_pago})", { full: true, type: "textarea", placeholder: "Alias: CARRANZA.INMO · CBU 0000… · Titular: …" })}
       </div>
+      <div class="form-field full carpeta-pdfs"><label>Carpeta donde se guardan los PDF (en esta PC)</label>
+        <div class="carpeta-fila"><code id="cfg-carpeta-pdfs">…</code><button type="button" class="btn-secondary btn-sm" id="cfg-carpeta-elegir">Elegir carpeta…</button><button type="button" class="btn-link" id="cfg-carpeta-defecto">Usar la de siempre</button></div>
+        <small class="field-hint">Adentro se arman solas las carpetas Recibos, Liquidaciones, Constancias servicios y Actas, separadas por mes. Podés elegir una carpeta de Google Drive o OneDrive para tenerlos también en la otra PC.</small></div>
       <div class="wa-guia">
         <b>Vincular el WhatsApp de la inmobiliaria en esta PC (una vez por PC):</b>
         <ol>
@@ -3949,3 +4021,32 @@ async function consultarBcraWeb(cuit) {
   const cantidad_cheques = (cheques?.causales || []).flatMap((c) => c.entidades || []).reduce((a, e) => a + (e.detalle?.length || 0), 0);
   return { cuit, situacion, peor_historica, cantidad_cheques, deudas, historicas, cheques };
 }
+
+// ---------- Carpeta de PDFs (configuración, por PC) ----------
+
+async function pintarCarpetaPdfs() {
+  const el = $("cfg-carpeta-pdfs");
+  if (!el || el.dataset.pintado) return;
+  el.dataset.pintado = "1";
+  el.textContent = carpetaPdfs() || (await invoke("carpeta_pdfs_por_defecto").catch(() => "Documentos\\Carranza Inmobiliaria"));
+}
+new MutationObserver(pintarCarpetaPdfs).observe($("cfg-body"), { childList: true });
+document.addEventListener("click", async (e) => {
+  if (e.target.closest("#cfg-carpeta-elegir")) {
+    const actual = carpetaPdfs() || (await invoke("carpeta_pdfs_por_defecto").catch(() => null));
+    const elegida = await invoke("elegir_carpeta", { actual }).catch((err) => (toast(String(err), true), null));
+    if (!elegida) return;
+    try {
+      localStorage.setItem("carpeta_pdfs", elegida);
+    } catch {}
+    $("cfg-carpeta-pdfs").textContent = elegida;
+    toast("Carpeta de PDFs guardada para esta PC");
+  }
+  if (e.target.closest("#cfg-carpeta-defecto")) {
+    try {
+      localStorage.removeItem("carpeta_pdfs");
+    } catch {}
+    $("cfg-carpeta-pdfs").textContent = await invoke("carpeta_pdfs_por_defecto").catch(() => "Documentos\\Carranza Inmobiliaria");
+    toast("Se usa la carpeta Documentos\\Carranza Inmobiliaria");
+  }
+});

@@ -75,8 +75,12 @@ fn navegador() -> Option<PathBuf> {
 /// Genera un PDF a partir de un HTML autocontenido. Devuelve la ruta al PDF.
 #[tauri::command]
 pub async fn generar_pdf(html: String, nombre: String) -> Result<String, String> {
+    generar_pdf_temporal(&html, &nombre)
+}
+
+fn generar_pdf_temporal(html: &str, nombre: &str) -> Result<String, String> {
     let dir = carpeta_salida().map_err(|e| format!("No se pudo crear la carpeta de PDFs: {}", e))?;
-    let base = nombre_seguro(&nombre);
+    let base = nombre_seguro(nombre);
     let html_path = dir.join(format!("{}.html", base));
     let pdf_path = dir.join(format!("{}.pdf", base));
     std::fs::write(&html_path, html.as_bytes()).map_err(|e| format!("No se pudo guardar el HTML temporal: {}", e))?;
@@ -151,4 +155,96 @@ pub async fn copiar_pdf_portapapeles(ruta: String) -> Result<(), String> {
         let _ = ruta;
         Ok(())
     }
+}
+
+
+// ---------- Guardar en una carpeta elegida ----------
+
+/// Carpeta por defecto: Documentos\Carranza Inmobiliaria.
+fn carpeta_por_defecto<R: tauri::Runtime>(app: &tauri::AppHandle<R>) -> PathBuf {
+    use tauri::Manager;
+    app.path()
+        .document_dir()
+        .or_else(|_| app.path().home_dir())
+        .unwrap_or_else(|_| std::env::temp_dir())
+        .join("Carranza Inmobiliaria")
+}
+
+#[tauri::command]
+pub fn carpeta_pdfs_por_defecto<R: tauri::Runtime>(app: tauri::AppHandle<R>) -> String {
+    carpeta_por_defecto(&app).to_string_lossy().to_string()
+}
+
+/// Genera el PDF y lo deja en `carpeta` (o la de por defecto) / `subcarpeta`
+/// (ej. "Recibos/2026-10"). Si ya existe un archivo con ese nombre, lo
+/// reemplaza (es el mismo documento). Devuelve la ruta final.
+#[tauri::command]
+pub async fn guardar_pdf<R: tauri::Runtime>(
+    app: tauri::AppHandle<R>,
+    html: String,
+    nombre: String,
+    carpeta: Option<String>,
+    subcarpeta: Option<String>,
+) -> Result<String, String> {
+    let temporal = generar_pdf_temporal(&html, &nombre)?;
+    let mut destino = match carpeta.as_deref().map(str::trim) {
+        Some(c) if !c.is_empty() => PathBuf::from(c),
+        _ => carpeta_por_defecto(&app),
+    };
+    for parte in subcarpeta.unwrap_or_default().split(['/', '\\']) {
+        let p = nombre_seguro(parte);
+        if !parte.trim().is_empty() {
+            destino.push(p);
+        }
+    }
+    std::fs::create_dir_all(&destino).map_err(|e| format!("No se pudo crear la carpeta {}: {}", destino.display(), e))?;
+    let archivo = destino.join(format!("{}.pdf", nombre_seguro(&nombre)));
+    std::fs::copy(&temporal, &archivo).map_err(|e| {
+        format!("No se pudo guardar el PDF en {} ({}). Si el PDF está abierto, cerralo y probá de nuevo.", archivo.display(), e)
+    })?;
+    Ok(archivo.to_string_lossy().to_string())
+}
+
+/// Abre el Explorador de Windows con el archivo seleccionado (para
+/// arrastrarlo a WhatsApp, a un mail, etc.).
+#[tauri::command]
+pub async fn mostrar_en_carpeta(ruta: String) -> Result<(), String> {
+    if !Path::new(&ruta).exists() {
+        return Err(format!("No existe el archivo: {}", ruta));
+    }
+    #[cfg(windows)]
+    {
+        Command::new("explorer").arg(format!("/select,{}", ruta)).spawn().map_err(|e| e.to_string())?;
+    }
+    #[cfg(not(windows))]
+    {
+        let _ = ruta;
+    }
+    Ok(())
+}
+
+/// Abre el PDF con el programa predeterminado.
+#[tauri::command]
+pub async fn abrir_pdf<R: tauri::Runtime>(app: tauri::AppHandle<R>, ruta: String) -> Result<(), String> {
+    use tauri_plugin_opener::OpenerExt;
+    if !ruta.to_lowercase().ends_with(".pdf") || !Path::new(&ruta).exists() {
+        return Err("No se encontró el PDF".into());
+    }
+    app.opener().open_path(ruta, None::<&str>).map_err(|e| e.to_string())
+}
+
+/// Ventana para elegir la carpeta donde se guardan los PDFs.
+#[tauri::command]
+pub async fn elegir_carpeta<R: tauri::Runtime>(app: tauri::AppHandle<R>, actual: Option<String>) -> Result<Option<String>, String> {
+    use tauri_plugin_dialog::DialogExt;
+    let mut d = app.dialog().file().set_title("Carpeta donde guardar los PDFs");
+    if let Some(a) = actual.filter(|a| Path::new(a).exists()) {
+        d = d.set_directory(a);
+    }
+    let (tx, rx) = tokio::sync::oneshot::channel();
+    d.pick_folder(move |r| {
+        let _ = tx.send(r);
+    });
+    let elegido = rx.await.map_err(|e| e.to_string())?;
+    Ok(elegido.and_then(|f| f.into_path().ok()).map(|p| p.to_string_lossy().to_string()))
 }
