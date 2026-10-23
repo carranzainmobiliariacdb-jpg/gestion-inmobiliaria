@@ -615,7 +615,47 @@ $("dash-btn-cobrar").addEventListener("click", () => abrirCobro());
 $("dash-dias-venc").addEventListener("change", renderDashboard);
 $("dash-dias-cumple").addEventListener("change", renderDashboard);
 
+// ---------- Cotización del dólar (Banco Nación y blue) ----------
+
+let dolarCache = null;
+let dolarHora = 0;
+const pesos0 = (n) => "$ " + Number(n).toLocaleString("es-AR", { maximumFractionDigits: 2 });
+function horaCotizacion(iso) {
+  const d = new Date(iso);
+  if (isNaN(d)) return "";
+  return d.toLocaleString("es-AR", { day: "2-digit", month: "2-digit", hour: "2-digit", minute: "2-digit" });
+}
+function pintarDolar(estado = "") {
+  const el = $("dash-dolar");
+  if (!el) return;
+  const d = dolarCache;
+  if (!d) {
+    el.innerHTML = `<span class="dolar-tit">💵 Dólar</span><span class="dolar-sub">${estado || "Consultando…"}</span>`;
+    return;
+  }
+  const fila = (nombre, x) =>
+    x ? `<span class="dolar-fila"><b>${nombre}</b><span>Compra <b>${pesos0(x.compra)}</b></span><span>Venta <b>${pesos0(x.venta)}</b></span></span>` : "";
+  el.innerHTML = `${fila("Banco Nación", d.oficial)}${fila("Blue", d.blue)}
+    <span class="dolar-sub">${estado || `Actualizado ${horaCotizacion(d.blue?.fecha || d.oficial?.fecha)} · ${esc(d.fuente)} · ↻`}</span>`;
+}
+async function cargarDolar(forzar = false) {
+  if (!forzar && dolarCache && Date.now() - dolarHora < 15 * 60 * 1000) return pintarDolar();
+  pintarDolar(dolarCache ? "Actualizando…" : "");
+  try {
+    dolarCache = await invoke("cotizacion_dolar");
+    dolarHora = Date.now();
+    pintarDolar();
+  } catch (e) {
+    pintarDolar(dolarCache ? "Sin conexión: muestra la última cotización" : "Sin conexión para consultar la cotización");
+  }
+}
+$("dash-dolar").addEventListener("click", () => cargarDolar(true));
+setInterval(() => {
+  if ($("view-dashboard").classList.contains("active")) cargarDolar(true);
+}, 30 * 60 * 1000);
+
 async function renderDashboard() {
+  cargarDolar();
   const d = await call("get_dashboard", {
     diasVencimiento: Number($("dash-dias-venc").value || 60),
     diasActualizacion: 45,

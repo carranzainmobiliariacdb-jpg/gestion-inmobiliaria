@@ -7,6 +7,7 @@ mod models;
 mod servicios;
 mod carga;
 mod pdf;
+mod dolar;
 mod supabase;
 
 pub use commands::DbState;
@@ -119,6 +120,7 @@ pub fn manejador<R: tauri::Runtime>() -> impl Fn(tauri::ipc::Invoke<R>) -> bool 
         pdf::abrir_pdf,
         pdf::elegir_carpeta,
         pdf::pegar_pdf_whatsapp,
+        dolar::cotizacion_dolar,
     ]
 }
 
