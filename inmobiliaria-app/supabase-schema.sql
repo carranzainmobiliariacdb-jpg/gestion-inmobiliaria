@@ -292,9 +292,12 @@ ALTER TABLE garantes ADD COLUMN IF NOT EXISTS bcra_detalle JSONB;
 DO $$
 DECLARE t record;
 BEGIN
-  FOR t IN SELECT tablename FROM pg_tables WHERE schemaname = 'public' LOOP
-    EXECUTE format('ALTER TABLE public.%I DISABLE ROW LEVEL SECURITY', t.tablename);
-  END LOOP;
+  -- Una vez activado el portal (seguridad_activa existe) no se vuelve a abrir.
+  IF NOT EXISTS (SELECT 1 FROM pg_proc WHERE proname = 'seguridad_activa') THEN
+    FOR t IN SELECT tablename FROM pg_tables WHERE schemaname = 'public' LOOP
+      EXECUTE format('ALTER TABLE public.%I DISABLE ROW LEVEL SECURITY', t.tablename);
+    END LOOP;
+  END IF;
 END $$;
 
 GRANT USAGE ON SCHEMA public TO anon, authenticated;
@@ -355,9 +358,12 @@ CREATE TABLE IF NOT EXISTS servicios_estado (
 DO $$
 DECLARE t record;
 BEGIN
-  FOR t IN SELECT tablename FROM pg_tables WHERE schemaname = 'public' LOOP
-    EXECUTE format('ALTER TABLE public.%I DISABLE ROW LEVEL SECURITY', t.tablename);
-  END LOOP;
+  -- Una vez activado el portal (seguridad_activa existe) no se vuelve a abrir.
+  IF NOT EXISTS (SELECT 1 FROM pg_proc WHERE proname = 'seguridad_activa') THEN
+    FOR t IN SELECT tablename FROM pg_tables WHERE schemaname = 'public' LOOP
+      EXECUTE format('ALTER TABLE public.%I DISABLE ROW LEVEL SECURITY', t.tablename);
+    END LOOP;
+  END IF;
 END $$;
 
 GRANT USAGE ON SCHEMA public TO anon, authenticated;

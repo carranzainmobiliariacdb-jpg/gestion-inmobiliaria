@@ -148,6 +148,11 @@ function mitadRecibo(r, cfg, copia) {
   </div>`;
 }
 
+/** Sólo el ORIGINAL (para el portal del inquilino). */
+export function htmlReciboOriginal(r, cfg) {
+  return `<div class="doc doc-recibo-m doc-recibo-uno">${mitadRecibo(r, cfg, "ORIGINAL")}</div>`;
+}
+
 export function htmlRecibo(r, cfg) {
   return `<div class="doc doc-recibo-m">${mitadRecibo(r, cfg, "DUPLICADO")}<div class="rm-corte"></div>${mitadRecibo(r, cfg, "ORIGINAL")}</div>`;
 }

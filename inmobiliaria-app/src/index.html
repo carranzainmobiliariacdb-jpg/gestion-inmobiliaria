@@ -28,6 +28,7 @@
         <div class="nav-grupo">Cobranza</div>
         <button class="nav-btn" data-view="cobros"><svg class="icon" viewBox="0 0 24 24"><rect x="2" y="6" width="20" height="12" rx="2"/><circle cx="12" cy="12" r="3"/></svg> Cobros y recibos</button>
         <button class="nav-btn" data-view="liquidaciones"><svg class="icon" viewBox="0 0 24 24"><path d="M14 2H6a2 2 0 0 0-2 2v16a2 2 0 0 0 2 2h12a2 2 0 0 0 2-2V8z"/><polyline points="14 2 14 8 20 8"/><path d="M9 15h6M12 12v6"/></svg> Liquidaciones</button>
+        <button class="nav-btn" data-view="portal"><svg class="icon" viewBox="0 0 24 24"><rect x="6" y="2" width="12" height="20" rx="2.5"/><line x1="11" y1="18" x2="13" y2="18"/></svg> Portal inquilinos <span class="nav-badge hidden" id="badge-portal"></span></button>
         <div class="nav-grupo">Cartera</div>
         <button class="nav-btn" data-view="contratos"><svg class="icon" viewBox="0 0 24 24"><path d="M14 2H6a2 2 0 0 0-2 2v16a2 2 0 0 0 2 2h12a2 2 0 0 0 2-2V8z"/><polyline points="14 2 14 8 20 8"/><line x1="8" y1="13" x2="16" y2="13"/><line x1="8" y1="17" x2="13" y2="17"/></svg> Contratos</button>
         <button class="nav-btn" data-view="inmuebles"><svg class="icon" viewBox="0 0 24 24"><path d="M3 10.5 12 3l9 7.5"/><path d="M5 9v11h14V9"/><path d="M10 20v-6h4v6"/></svg> Inmuebles</button>
@@ -226,6 +227,14 @@
       </section>
 
       <!-- CONFIGURACIÓN -->
+      <section id="view-portal" class="view">
+        <header class="view-header">
+          <div><h1>Portal de inquilinos</h1><p class="sub">Cada inquilino ve en su celular su estado de cuenta, sus recibos, informa pagos y hace reclamos.</p></div>
+          <div class="header-actions"><button class="btn-secondary" id="portal-refrescar">Actualizar</button></div>
+        </header>
+        <div id="portal-body"></div>
+      </section>
+
       <section id="view-configuracion" class="view">
         <header class="view-header">
           <div><h1>Configuración</h1><p class="sub">Se comparte entre todas las PCs de la inmobiliaria.</p></div>
@@ -287,6 +296,22 @@
         <p class="login-error" id="login-error"></p>
         <button type="submit" class="btn-primary login-submit" id="login-submit">Ingresar</button>
       </form>
+    </div>
+  </div>
+
+  <!-- Esta PC necesita la clave de la oficina (base protegida) -->
+  <div id="clave-screen" class="login-screen hidden">
+    <div class="login-card login-card-ancha">
+      <div class="login-brand"><span class="brand-icon"><img src="logo-carranza.png" alt="" /></span><h1>Esta PC necesita la clave de la oficina</h1></div>
+      <p class="login-subtitle">La base de datos está protegida (por el Portal de inquilinos). Hay que pegar la clave privada <b>una sola vez en cada PC</b>. Queda guardada sólo en esta computadora.</p>
+      <ol class="migracion-pasos">
+        <li>Entrá a <b>supabase.com</b> → tu proyecto → <b>Project Settings</b> (engranaje) → <b>API Keys</b>.</li>
+        <li>Pestaña <b>Legacy API keys</b> → en <b>service_role</b> tocá <b>Reveal</b> y después <b>Copy</b>.</li>
+        <li>Pegala acá abajo y tocá <b>Guardar</b>. <b>No la compartas con nadie ni la mandes por WhatsApp.</b></li>
+      </ol>
+      <div class="form-field"><label>Clave service_role</label><input type="password" id="clave-oficina" placeholder="eyJ…" autocomplete="off" /></div>
+      <p class="login-error" id="clave-error"></p>
+      <button class="btn-primary login-submit" id="clave-guardar">Guardar</button>
     </div>
   </div>
 

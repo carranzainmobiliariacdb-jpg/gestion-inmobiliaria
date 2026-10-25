@@ -1,0 +1,9 @@
+{
+  "name": "Mi alquiler · Carranza Inmobiliaria",
+  "short_name": "Mi alquiler",
+  "start_url": "./",
+  "display": "standalone",
+  "background_color": "#f4f2ec",
+  "theme_color": "#15181e",
+  "icons": [{ "src": "logo-carranza.png", "sizes": "321x302", "type": "image/png", "purpose": "any" }]
+}

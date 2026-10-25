@@ -17,7 +17,11 @@ CREATE TABLE IF NOT EXISTS servicios_estado (
     UNIQUE (servicio, cuenta)
 );
 
-ALTER TABLE servicios_estado DISABLE ROW LEVEL SECURITY;
+DO $$ BEGIN
+  IF NOT EXISTS (SELECT 1 FROM pg_proc WHERE proname = 'seguridad_activa') THEN
+    ALTER TABLE servicios_estado DISABLE ROW LEVEL SECURITY;
+  END IF;
+END $$;
 GRANT SELECT, INSERT, UPDATE, DELETE ON servicios_estado TO anon, authenticated;
 GRANT USAGE, SELECT ON ALL SEQUENCES IN SCHEMA public TO anon, authenticated;
 

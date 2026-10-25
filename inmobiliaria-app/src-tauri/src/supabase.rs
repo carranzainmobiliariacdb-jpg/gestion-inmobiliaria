@@ -49,7 +49,7 @@ pub struct Cliente {
 
 impl Cliente {
     pub fn nuevo(config: &SupabaseConfig) -> Self {
-        Self::con_base_completa(format!("{}/rest/v1", normalizar_url(&config.url)), normalizar_clave(&config.anon_key))
+        Self::con_base_completa(format!("{}/rest/v1", normalizar_url(&config.url)), normalizar_clave(config.clave_en_uso()))
     }
 
     /// Apunta directo a la base dada, sin asumir el prefijo `/rest/v1` que
@@ -67,18 +67,31 @@ impl Cliente {
     /// Prueba la conexión con una consulta liviana, para detectar
     /// credenciales o red incorrectas de entrada en vez de que fallen recién
     /// en el primer uso real.
+    /// Rol de la clave en uso ("service_role", "anon", "secret", "publishable").
+    pub fn rol(&self) -> Option<String> {
+        crate::config::rol_de_clave(&self.anon_key)
+    }
+
     pub async fn probar(&self) -> Result<(), ErrorSupabase> {
-        self.req(Method::GET, "/usuarios?select=id&limit=1").send_verificado().await?;
-        Ok(())
+        match self.req(Method::GET, "/usuarios?select=id&limit=1").send_verificado().await {
+            Ok(_) => Ok(()),
+            // Base bloqueada para la clave pública (portal activado): la
+            // conexión anda, falta la clave de la oficina en esta PC.
+            Err(e) if e.codigo.as_deref() == Some("42501") => Ok(()),
+            Err(e) => Err(e),
+        }
     }
 
     fn req(&self, method: Method, ruta: &str) -> PeticionConstruida {
-        let builder = self
+        let mut builder = self
             .http
             .request(method, format!("{}{}", self.base, ruta))
             .header("apikey", &self.anon_key)
-            .header("Authorization", format!("Bearer {}", self.anon_key))
             .header("Content-Type", "application/json");
+        // Las claves nuevas (sb_…) no son JWT: van sólo en "apikey".
+        if !self.anon_key.starts_with("sb_") {
+            builder = builder.header("Authorization", format!("Bearer {}", self.anon_key));
+        }
         PeticionConstruida(builder)
     }
 
@@ -128,6 +141,12 @@ impl Cliente {
     pub async fn update(&self, tabla: &str, filtro: &str, body: &Value) -> Result<(), ErrorSupabase> {
         self.req(Method::PATCH, &format!("/{}?{}", tabla, filtro)).json(body).send_verificado().await?;
         Ok(())
+    }
+
+    /// Llama a una función de la base (POST /rpc/nombre) y devuelve el resultado.
+    pub async fn rpc(&self, funcion: &str, body: &Value) -> Result<Value, ErrorSupabase> {
+        let resp = self.req(Method::POST, &format!("/rpc/{}", funcion)).json(body).send_verificado().await?;
+        resp.json::<Value>().await.map_err(error_de_red)
     }
 
     pub async fn delete(&self, tabla: &str, filtro: &str) -> Result<(), ErrorSupabase> {

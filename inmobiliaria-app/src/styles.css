@@ -453,6 +453,7 @@ small.muted { font-size: 12px; }
 
 /* Recibo: A4 apaisado, duplicado + original */
 .doc-recibo-m { width: 281mm; height: 194mm; display: grid; grid-template-columns: 1fr 6mm 1fr; }
+.doc-recibo-m.doc-recibo-uno { width: 138mm; grid-template-columns: 1fr; }
 .rm-corte { border-left: 1px dashed #b9b5aa; margin-left: 3mm; }
 .rm-mitad { display: flex; flex-direction: column; border: 1px solid #d6d0c2; border-radius: 3mm; overflow: hidden; font-size: 10px; min-width: 0; }
 .rm-cab { display: flex; align-items: center; gap: 10px; background: #15181e; color: #fff; padding: 9px 12px; }
@@ -582,3 +583,8 @@ tr.agua-hecha { background: #f6fbf7; }
 .respaldo-opciones input { width: auto; margin: 0; }
 .respaldo-panel #resp-ahora { align-self: flex-start; }
 .cfg-grid .respaldo-panel { grid-column: 1 / -1; }
+/* Portal de inquilinos (oficina) */
+.portal-activar { padding: 20px 22px; max-width: 900px; }
+.portal-pasos { padding-left: 20px; line-height: 1.6; display: flex; flex-direction: column; gap: 14px; }
+.portal-pasos li.hecho > b { color: var(--success, #1d7a46); }
+#portal-tabs { margin-bottom: 14px; }

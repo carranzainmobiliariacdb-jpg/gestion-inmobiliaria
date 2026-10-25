@@ -9,6 +9,7 @@ mod carga;
 mod pdf;
 mod dolar;
 mod respaldo;
+mod portal;
 mod supabase;
 
 pub use commands::DbState;
@@ -124,6 +125,13 @@ pub fn manejador<R: tauri::Runtime>() -> impl Fn(tauri::ipc::Invoke<R>) -> bool 
         dolar::cotizacion_dolar,
         respaldo::hacer_respaldo,
         respaldo::carpetas_nube,
+        portal::portal_listar,
+        portal::portal_actualizar,
+        portal::portal_crear_acceso,
+        portal::portal_crear_aviso,
+        portal::portal_imagen,
+        commands::guardar_clave_oficina,
+        commands::estado_seguridad,
     ]
 }
 

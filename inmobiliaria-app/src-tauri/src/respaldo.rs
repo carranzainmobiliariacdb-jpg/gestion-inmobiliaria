@@ -31,6 +31,10 @@ const TABLAS: &[(&str, &str, &str, &str)] = &[
     ("indices_ipc", "IPC manual", "*", "periodo"),
     ("configuracion", "Configuración", "*", "clave"),
     ("usuarios", "Usuarios", "id,username,nombre_completo,activo", "id"),
+    ("portal_accesos", "Portal - links", "inquilino_id,creado,activo,ultimo_acceso", "creado"),
+    ("portal_pagos_informados", "Portal - pagos informados", "id,inquilino_id,contrato_id,periodos,monto,fecha,metodo,nota,estado,respuesta,pago_id,creado,revisado", "id"),
+    ("portal_reclamos", "Portal - reclamos", "id,inquilino_id,contrato_id,titulo,descripcion,estado,respuesta,creado,actualizado", "id"),
+    ("portal_avisos", "Portal - avisos", "*", "id"),
 ];
 
 const LOTE: usize = 1000;
@@ -179,6 +183,8 @@ pub async fn hacer_respaldo(
                 todo.insert(tabla.to_string(), Value::Array(filas.clone()));
                 por_tabla.push((hoja_nombre, filas));
             }
+            // Las tablas del portal no existen hasta que se activa: no es un error.
+            Err(_) if tabla.starts_with("portal_") => {}
             Err(e) => errores.push(format!("{}: {}", hoja_nombre, e)),
         }
     }

@@ -24,9 +24,12 @@ CREATE INDEX IF NOT EXISTS documentos_generados_contrato ON documentos_generados
 DO $$
 DECLARE t record;
 BEGIN
-  FOR t IN SELECT tablename FROM pg_tables WHERE schemaname = 'public' LOOP
-    EXECUTE format('ALTER TABLE public.%I DISABLE ROW LEVEL SECURITY', t.tablename);
-  END LOOP;
+  -- Una vez activado el portal (seguridad_activa existe) no se vuelve a abrir.
+  IF NOT EXISTS (SELECT 1 FROM pg_proc WHERE proname = 'seguridad_activa') THEN
+    FOR t IN SELECT tablename FROM pg_tables WHERE schemaname = 'public' LOOP
+      EXECUTE format('ALTER TABLE public.%I DISABLE ROW LEVEL SECURITY', t.tablename);
+    END LOOP;
+  END IF;
 END $$;
 
 GRANT USAGE ON SCHEMA public TO anon, authenticated;

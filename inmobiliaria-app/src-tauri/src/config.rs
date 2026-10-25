@@ -5,6 +5,38 @@ use std::path::PathBuf;
 pub struct SupabaseConfig {
     pub url: String,
     pub anon_key: String,
+    /// Clave privada de la oficina (service_role / sb_secret_…). Se pega una
+    /// vez en cada PC y queda sólo en esa PC (nunca en el instalador). Con la
+    /// seguridad del portal activada, la clave pública ya no lee las tablas.
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub clave_oficina: Option<String>,
+}
+
+impl SupabaseConfig {
+    /// Clave con la que habla el programa: la de la oficina si está, si no la pública.
+    pub fn clave_en_uso(&self) -> &str {
+        match self.clave_oficina.as_deref().map(str::trim) {
+            Some(c) if !c.is_empty() => c,
+            _ => &self.anon_key,
+        }
+    }
+}
+
+/// Rol que trae una clave de Supabase: "service_role", "anon", o "secret" /
+/// "publishable" para las claves nuevas (sb_secret_… / sb_publishable_…).
+pub fn rol_de_clave(clave: &str) -> Option<String> {
+    use base64::Engine;
+    let c = clave.trim();
+    if c.starts_with("sb_secret_") {
+        return Some("secret".into());
+    }
+    if c.starts_with("sb_publishable_") {
+        return Some("publishable".into());
+    }
+    let payload = c.split('.').nth(1)?;
+    let bytes = base64::engine::general_purpose::URL_SAFE_NO_PAD.decode(payload.trim_end_matches('=')).ok()?;
+    let v: serde_json::Value = serde_json::from_slice(&bytes).ok()?;
+    v.get("role").and_then(|r| r.as_str()).map(|r| r.to_string())
 }
 
 #[derive(Debug, Clone, Serialize, Deserialize)]

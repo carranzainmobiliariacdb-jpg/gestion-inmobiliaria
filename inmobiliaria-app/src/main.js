@@ -48,6 +48,9 @@ const CONFIG_DEFECTO = {
   wa_inmobiliaria: "3468563371",
   wa_modo: "app",
   wa_pdf_auto: "enviar",
+  portal_url: "https://carranzainmobiliariacdb-jpg.github.io/gestion-inmobiliaria/",
+  plantilla_portal:
+    "Hola {nombre}! Desde {inmobiliaria} te compartimos tu acceso personal al Portal del inquilino: ahí ves tu estado de cuenta, descargás tus recibos, informás pagos y hacés reclamos desde el celular.\n{link}\nEs personal: no lo compartas.",
   wa_datos_pago: "",
   aviso_dias_antes: "5",
   plantilla_recordatorio:
@@ -148,6 +151,7 @@ function switchView(view) {
   if (view === "configuracion") renderConfig();
   if (view === "documentos") renderDocumentos();
   if (view === "servicios") renderServicios();
+  if (view === "portal") renderPortal();
 }
 
 // Buscadores de las tablas
@@ -569,6 +573,7 @@ async function loadAll() {
   renderTodo();
   await renderDashboard();
   actualizarBadges();
+  cargarPortal().catch(() => {});
 }
 
 function renderTodo() {
@@ -2766,7 +2771,7 @@ function textoFormaPago(metodo, d) {
 /** Abre el formulario de cobro. contratoId/periodo opcionales (desde el tablero).
  *  Se pueden marcar varios períodos: se registra una fila por mes, todas con el
  *  mismo número de recibo, y sale un solo recibo con el detalle de cada mes. */
-async function abrirCobro(contratoId = null, periodo = null) {
+async function abrirCobro(contratoId = null, periodo = null, extra = {}) {
   const activos = contratosActivos().sort((a, b) => (a.inmueble_codigo || 1e9) - (b.inmueble_codigo || 1e9));
   if (!activos.length) return toast("No hay contratos activos", true);
   const hoy = hoyIso();
@@ -2953,7 +2958,8 @@ async function abrirCobro(contratoId = null, periodo = null) {
     elegidos = [];
     autoConceptos = new Set();
     $("cb-conceptos-wrap").innerHTML = "";
-    cambiarMeses([per || periodoSugerido(c)]);
+    const lista = (Array.isArray(per) ? per : [per]).filter(Boolean);
+    cambiarMeses(lista.length ? lista : [periodoSugerido(c)]);
   };
 
   openModal({
@@ -2987,6 +2993,13 @@ async function abrirCobro(contratoId = null, periodo = null) {
         $("cb-metodo-detalle").querySelector("input")?.focus();
       });
       pintarDetallePago("Efectivo");
+      if (extra.fecha) $("cb-fecha").value = extra.fecha;
+      if (extra.notas) $("cb-notas").value = extra.notas;
+      if (extra.metodo) {
+        const m = ["Efectivo", "Transferencia", "Cheque"].includes(extra.metodo) ? extra.metodo : "Otro";
+        document.querySelector(`#cb-metodo-opc [data-metodo="${m}"]`)?.click();
+        if (m === "Otro") setTimeout(() => { const i = document.querySelector('#cb-metodo-detalle [data-pago="detalle"]'); if (i) i.value = extra.metodo; }, 0);
+      }
       $("cb-meses").addEventListener("change", (e) => {
         const p = e.target.dataset.mes;
         if (!p) return;
@@ -3019,6 +3032,7 @@ async function abrirCobro(contratoId = null, periodo = null) {
       const nuevos = armarPagos();
       const ids = await call("registrar_pagos", { nuevos });
       toast(nuevos.length > 1 ? `Cobro de ${nuevos.length} meses registrado` : "Cobro registrado");
+      if (extra.onRegistrado) await extra.onRegistrado(ids[0]).catch((e) => console.error(e));
       await loadAll();
       setTimeout(() => verRecibo(ids[0]), 0);
     },
@@ -3521,6 +3535,7 @@ const VARIABLES = {
   plantilla_liquidacion: ["nombre", "numero", "monto", "inmobiliaria"],
   plantilla_cumple: ["nombre", "inmobiliaria"],
   plantilla_servicio: ["nombre", "inmueble", "servicio", "periodos", "vencimiento", "monto", "inmobiliaria"],
+  plantilla_portal: ["nombre", "link", "inmobiliaria"],
 };
 
 async function renderConfig() {
@@ -3584,6 +3599,7 @@ async function renderConfig() {
       ["plantilla_liquidacion", "Liquidación al propietario"],
       ["plantilla_cumple", "Cumpleaños"],
       ["plantilla_servicio", "Servicio impago (luz, gas, agua)"],
+      ["plantilla_portal", "Link del Portal del inquilino"],
     ];
     body.innerHTML = `<div class="cfg-grid">
       <div class="panel"><h3>Datos generales</h3><div class="form-grid">
@@ -3597,6 +3613,7 @@ async function renderConfig() {
         ${campoCfg("wa_codigo_area", "Característica por defecto", { hint: "Para teléfonos cargados sin característica (ej. 3468)" })}
         ${campoCfg("aviso_dias_antes", "Recordar el pago con (días de anticipación)", { type: "number" })}
         ${campoCfg("wa_datos_pago", "Datos para transferir (van en {datos_pago})", { full: true, type: "textarea", placeholder: "Alias: CARRANZA.INMO · CBU 0000… · Titular: …" })}
+        ${campoCfg("portal_url", "Dirección del Portal de inquilinos", { full: true, hint: "Los links personales se arman con esta dirección." })}
       </div>
       <div class="form-field full carpeta-pdfs"><label>Carpeta donde se guardan los PDF (en esta PC)</label>
         <div class="carpeta-fila"><code id="cfg-carpeta-pdfs">…</code><button type="button" class="btn-secondary btn-sm" id="cfg-carpeta-elegir">Elegir carpeta…</button><button type="button" class="btn-link" id="cfg-carpeta-defecto">Usar la de siempre</button></div>
@@ -3767,6 +3784,14 @@ const loginForm = $("login-form");
 const loginError = $("login-error");
 
 async function mostrarLogin(recordadas) {
+  const seg = await invoke("estado_seguridad").catch(() => null);
+  if (seg && !seg.acceso) {
+    $("clave-screen").classList.remove("hidden");
+    loginScreen.classList.add("hidden");
+    mostrarLogin._recordadas = recordadas;
+    return;
+  }
+  $("clave-screen").classList.add("hidden");
   loginError.textContent = "";
   loginForm.reset();
   const esPrimerUso = !(await call("hay_usuarios"));
@@ -3945,6 +3970,21 @@ async function arrancar() {
     conexionScreen.classList.remove("hidden");
   }
 }
+
+$("clave-guardar").addEventListener("click", async () => {
+  const b = $("clave-guardar");
+  $("clave-error").textContent = "";
+  b.disabled = true;
+  try {
+    await invoke("guardar_clave_oficina", { clave: $("clave-oficina").value });
+    $("clave-oficina").value = "";
+    await mostrarLogin(mostrarLogin._recordadas);
+  } catch (e) {
+    $("clave-error").textContent = String(e);
+  } finally {
+    b.disabled = false;
+  }
+});
 
 arrancar().catch((e) => console.error(e));
 
@@ -4234,3 +4274,260 @@ function respaldoAutomatico() {
     }
   }, 20000);
 }
+
+// ---------- PORTAL DE INQUILINOS (lado oficina) ----------
+
+const portal = { estado: null, accesos: [], pagos: [], reclamos: [], avisos: [], tab: "pagos" };
+const ESTADOS_RECLAMO = [["nuevo", "Nuevo"], ["recibido", "Recibido"], ["en_arreglo", "En arreglo"], ["resuelto", "Resuelto"]];
+
+/** Código secreto de 32 letras/números para el link de cada inquilino. */
+function nuevoCodigoPortal() {
+  const abc = "ABCDEFGHJKLMNPQRSTUVWXYZabcdefghijkmnpqrstuvwxyz23456789";
+  const b = new Uint8Array(32);
+  crypto.getRandomValues(b);
+  return Array.from(b, (x) => abc[x % abc.length]).join("");
+}
+const linkPortal = (token) => `${(cfg("portal_url") || "").replace(/\/?$/, "/")}#t=${token}`;
+
+/** "Octubre 2026, Noviembre 2026" → ["2026-10", "2026-11"] */
+function periodosDesdeTexto(txt) {
+  const meses = ["enero", "febrero", "marzo", "abril", "mayo", "junio", "julio", "agosto", "septiembre", "octubre", "noviembre", "diciembre"];
+  return String(txt || "")
+    .toLowerCase()
+    .split(",")
+    .map((p) => {
+      const m = p.trim().match(/^([a-záéíóú]+)\s+(\d{4})/);
+      const i = m ? meses.indexOf(m[1]) : -1;
+      return i >= 0 ? `${m[2]}-${String(i + 1).padStart(2, "0")}` : null;
+    })
+    .filter(Boolean);
+}
+
+async function cargarPortal() {
+  portal.estado = await invoke("estado_seguridad").catch(() => null);
+  if (!portal.estado?.seguridad_activa || !portal.estado?.portal_tablas) return;
+  const [accesos, pagos, reclamos, avisos] = await Promise.all(["accesos", "pagos", "reclamos", "avisos"].map((q) => invoke("portal_listar", { que: q }).catch(() => [])));
+  Object.assign(portal, { accesos, pagos, reclamos, avisos });
+  badgePortal();
+}
+function badgePortal() {
+  const n = portal.pagos.filter((p) => p.estado === "pendiente").length + portal.reclamos.filter((r) => r.estado === "nuevo").length;
+  $("badge-portal").textContent = n;
+  $("badge-portal").classList.toggle("hidden", !n);
+}
+$("portal-refrescar").addEventListener("click", async () => {
+  await cargarPortal();
+  renderPortal(false);
+});
+
+const inquilinoNombre = (id) => byId(state.inquilinos, id)?.nombre || "(inquilino)";
+const contratoTxt = (id) => {
+  const c = byId(state.contratos, id);
+  return c ? `${codHtml(c.inmueble_codigo)}${esc(c.inmueble_direccion)}` : "";
+};
+
+async function renderPortal(recargar = true) {
+  const body = $("portal-body");
+  if (recargar) {
+    body.innerHTML = '<p class="hint">Cargando…</p>';
+    await cargarPortal();
+  }
+  const e = portal.estado || {};
+  if (!e.seguridad_activa || !e.portal_tablas) return renderPortalActivar(body, e);
+  const pendP = portal.pagos.filter((p) => p.estado === "pendiente").length;
+  const nuevosR = portal.reclamos.filter((r) => r.estado === "nuevo").length;
+  const tabs = [
+    ["pagos", `Pagos informados${pendP ? ` (${pendP})` : ""}`],
+    ["reclamos", `Reclamos${nuevosR ? ` (${nuevosR})` : ""}`],
+    ["avisos", "Avisos"],
+    ["links", "Links de inquilinos"],
+  ];
+  body.innerHTML = `<div class="tabs" id="portal-tabs">${tabs.map(([k, l]) => `<button class="tab ${portal.tab === k ? "active" : ""}" data-ptab="${k}">${l}</button>`).join("")}</div>
+    <div id="portal-tab-body"></div>`;
+  const tb = $("portal-tab-body");
+  if (portal.tab === "pagos") tb.innerHTML = portalPagosHtml();
+  if (portal.tab === "reclamos") tb.innerHTML = portalReclamosHtml();
+  if (portal.tab === "avisos") tb.innerHTML = portalAvisosHtml();
+  if (portal.tab === "links") tb.innerHTML = portalLinksHtml();
+}
+
+function portalPagosHtml() {
+  const filas = portal.pagos.map((p) => {
+    const est = p.estado === "pendiente" ? '<span class="pill pill-warning">Pendiente</span>' : p.estado === "confirmado" ? '<span class="pill pill-ok">Confirmado</span>' : '<span class="pill pill-danger">Rechazado</span>';
+    return `<tr><td>${fmtDate(String(p.creado).slice(0, 10))}<span class="sub-line">${esc(new Date(p.creado).toLocaleTimeString("es-AR", { hour: "2-digit", minute: "2-digit" }))}</span></td>
+      <td><b>${esc(inquilinoNombre(p.inquilino_id))}</b><span class="sub-line">${contratoTxt(p.contrato_id)}</span></td>
+      <td>${esc(p.periodos || "")}<span class="sub-line">${esc(p.metodo || "")} · pagó ${fmtDate(p.fecha)}</span>${p.nota ? `<span class="sub-line">“${esc(p.nota)}”</span>` : ""}</td>
+      <td class="num"><b>${money(p.monto)}</b></td>
+      <td>${est}${p.respuesta ? `<span class="sub-line">${esc(p.respuesta)}</span>` : ""}</td>
+      <td class="actions"><button class="btn-link" data-pp-ver="${p.id}">Comprobante</button>${p.estado === "pendiente" ? `<button class="btn-primary btn-sm" data-pp-cobrar="${p.id}">Registrar cobro</button><button class="btn-link peligro" data-pp-rechazar="${p.id}">Rechazar</button>` : ""}</td></tr>`;
+  });
+  return `<p class="hint">Cuando un inquilino informa un pago desde el portal aparece acá. Revisá el comprobante y tocá <b>Registrar cobro</b>: se abre el cobro con los meses y la fecha cargados, y al inquilino le aparece confirmado.</p>
+    <div class="table-wrap"><table class="data-table"><thead><tr><th>Informado</th><th>Inquilino</th><th>Qué pagó</th><th class="num">Importe</th><th>Estado</th><th></th></tr></thead><tbody>${filas.join("") || vacio(6, "Todavía no hay pagos informados")}</tbody></table></div>`;
+}
+
+function portalReclamosHtml() {
+  const filas = portal.reclamos.map(
+    (r) => `<tr><td>${fmtDate(String(r.creado).slice(0, 10))}</td>
+      <td><b>${esc(inquilinoNombre(r.inquilino_id))}</b><span class="sub-line">${contratoTxt(r.contrato_id)}</span></td>
+      <td><b>${esc(r.titulo)}</b><span class="sub-line" style="white-space:normal">${esc(r.descripcion || "")}</span></td>
+      <td><select data-rec-estado="${r.id}">${ESTADOS_RECLAMO.map(([v, l]) => `<option value="${v}" ${r.estado === v ? "selected" : ""}>${l}</option>`).join("")}</select></td>
+      <td><input type="text" data-rec-resp="${r.id}" value="${esc(r.respuesta || "")}" placeholder="Respuesta que ve el inquilino" style="min-width:220px" /></td>
+      <td class="actions"><button class="btn-link" data-rec-foto="${r.id}">Foto</button><button class="btn-primary btn-sm" data-rec-guardar="${r.id}">Guardar</button></td></tr>`
+  );
+  return `<p class="hint">El estado y la respuesta que guardes los ve el inquilino en su portal.</p>
+    <div class="table-wrap"><table class="data-table"><thead><tr><th>Fecha</th><th>Inquilino</th><th>Reclamo</th><th>Estado</th><th>Respuesta</th><th></th></tr></thead><tbody>${filas.join("") || vacio(6, "No hay reclamos")}</tbody></table></div>`;
+}
+
+function portalAvisosHtml() {
+  const conLink = [...new Set(portal.accesos.filter((a) => a.activo).map((a) => a.inquilino_id))];
+  const filas = portal.avisos.map(
+    (a) => `<tr><td>${fmtDate(String(a.creado).slice(0, 10))}</td><td><b>${esc(a.titulo)}</b><span class="sub-line" style="white-space:normal">${esc(a.texto || "")}</span></td>
+      <td>${a.inquilino_id ? esc(inquilinoNombre(a.inquilino_id)) : "Todos"}</td><td>${a.activo ? '<span class="pill pill-ok">Visible</span>' : '<span class="pill pill-gris">Oculto</span>'}</td>
+      <td class="actions"><button class="btn-link" data-aviso-toggle="${a.id}" data-activo="${a.activo ? 1 : 0}">${a.activo ? "Ocultar" : "Mostrar"}</button></td></tr>`
+  );
+  return `<div class="panel" style="padding:16px;margin-bottom:14px"><h3 style="margin-top:0">Nuevo aviso</h3>
+      <div class="form-grid">
+        <div class="form-field"><label>Título</label><input type="text" id="av-titulo" placeholder="Ej.: Corte de agua el martes" /></div>
+        <div class="form-field"><label>Para</label><select id="av-para"><option value="">Todos los inquilinos</option>${conLink
+          .map((id) => [id, inquilinoNombre(id)])
+          .sort((a, b) => a[1].localeCompare(b[1]))
+          .map(([id, n]) => `<option value="${id}">${esc(n)}</option>`)
+          .join("")}</select></div>
+        <div class="form-field full"><label>Texto</label><textarea id="av-texto" placeholder="Aparece arriba de todo en el portal"></textarea></div>
+      </div><button class="btn-primary" id="av-crear">Publicar aviso</button></div>
+    <div class="table-wrap"><table class="data-table"><thead><tr><th>Fecha</th><th>Aviso</th><th>Para</th><th>Estado</th><th></th></tr></thead><tbody>${filas.join("") || vacio(5, "No hay avisos")}</tbody></table></div>`;
+}
+
+function portalLinksHtml() {
+  const activos = contratosActivos();
+  const porInq = new Map();
+  for (const c of activos) if (!porInq.has(c.inquilino_id)) porInq.set(c.inquilino_id, c);
+  const filas = [...porInq.values()]
+    .sort((a, b) => String(a.inquilino_nombre).localeCompare(String(b.inquilino_nombre)))
+    .map((c) => {
+      const acc = portal.accesos.find((a) => a.inquilino_id === c.inquilino_id && a.activo);
+      const estado = acc
+        ? `<span class="pill pill-ok">Con link</span><span class="sub-line">${acc.ultimo_acceso ? `Entró ${new Date(acc.ultimo_acceso).toLocaleString("es-AR", { day: "2-digit", month: "2-digit", hour: "2-digit", minute: "2-digit" })}` : "Todavía no entró"}</span>`
+        : '<span class="pill pill-gris">Sin link</span>';
+      return `<tr><td><b>${esc(c.inquilino_nombre)}</b><span class="sub-line">${esc(c.inquilino_telefono || "sin teléfono")}</span></td><td>${codHtml(c.inmueble_codigo)}${esc(c.inmueble_direccion)}</td><td>${estado}</td>
+        <td class="actions"><button class="btn-whatsapp btn-sm" data-pl-enviar="${c.inquilino_id}">${ICONO_WA} ${acc ? "Reenviar link" : "Enviar link"}</button>
+        ${acc ? `<button class="btn-link" data-pl-copiar="${c.inquilino_id}">Copiar link</button><button class="btn-link peligro" data-pl-renovar="${c.inquilino_id}" title="El link anterior deja de funcionar">Cambiar link</button>` : ""}</td></tr>`;
+    });
+  return `<p class="hint">Cada inquilino entra con su <b>link personal</b>. Mandáselo por WhatsApp con <b>Enviar link</b>. Si alguien lo comparte o se va, tocá <b>Cambiar link</b>: el anterior deja de funcionar.</p>
+    <div class="table-wrap"><table class="data-table"><thead><tr><th>Inquilino</th><th>Inmueble</th><th>Portal</th><th></th></tr></thead><tbody>${filas.join("") || vacio(4, "No hay contratos activos")}</tbody></table></div>`;
+}
+
+async function renderPortalActivar(body, e) {
+  body.innerHTML = `<div class="panel portal-activar">
+    <h3>Activar el Portal de inquilinos (una sola vez)</h3>
+    <p class="hint">Al activarlo, la base de datos queda <b>protegida</b>: la clave pública que viene en el instalador ya no puede leer nada, y cada inquilino sólo ve lo suyo con su link personal.</p>
+    <ol class="portal-pasos">
+      <li class="${e.clave_oficina ? "hecho" : ""}"><b>Clave de la oficina en esta PC</b> ${e.clave_oficina ? "✓ cargada" : ""}
+        ${e.clave_oficina ? "" : `<p class="hint">En <b>supabase.com</b> → tu proyecto → <b>Project Settings</b> → <b>API Keys</b> → pestaña <b>Legacy API keys</b> → <b>service_role</b> → <b>Reveal</b> → <b>Copy</b>. Pegala acá (queda sólo en esta PC, no la compartas):</p>
+        <div class="carpeta-fila"><input type="password" id="pa-clave" placeholder="eyJ…" style="min-width:360px" /><button class="btn-primary btn-sm" id="pa-clave-guardar">Guardar clave</button></div>`}</li>
+      <li class="${e.seguridad_activa ? "hecho" : ""}"><b>Activar en la base de datos</b> ${e.seguridad_activa ? "✓" : ""}
+        <p class="hint">Tocá <b>Copiar código</b>, entrá a <b>supabase.com</b> → tu proyecto → <b>SQL Editor</b> → <b>New query</b>, pegá con Ctrl+V y tocá <b>Run</b>. Tiene que decir <b>Success</b>.</p>
+        <button class="btn-secondary btn-sm" id="pa-copiar" ${e.clave_oficina ? "" : "disabled"}>Copiar código</button> <button class="btn-primary btn-sm" id="pa-verificar">Ya lo corrí: verificar</button></li>
+      <li><b>En la otra PC</b>: al abrir el programa te va a pedir la misma clave de la oficina. Pegala una vez y listo.</li>
+    </ol>
+    ${e.clave_oficina ? "" : '<p class="hint"><b>Importante:</b> primero cargá la clave (paso 1). Si activás la base antes, el programa te la va a pedir para poder entrar.</p>'}
+  </div>`;
+  $("pa-clave-guardar")?.addEventListener("click", async () => {
+    try {
+      await invoke("guardar_clave_oficina", { clave: $("pa-clave").value });
+      toast("Clave de la oficina guardada en esta PC");
+      renderPortal();
+    } catch (err) {
+      toast(String(err), true);
+    }
+  });
+  $("pa-copiar")?.addEventListener("click", async () => {
+    const sql = await (await fetch("portal-activar.sql")).text();
+    await copiarTexto(sql);
+    toast("Código copiado: pegalo en el SQL Editor de Supabase y tocá Run");
+  });
+  $("pa-verificar")?.addEventListener("click", async () => {
+    await renderPortal();
+    if (portal.estado?.seguridad_activa && portal.estado?.portal_tablas) toast("¡Portal activado!");
+    else toast("Todavía no se ve activado. Revisá que haya dicho Success y esperá unos segundos.", true);
+  });
+}
+
+$("portal-body").addEventListener("click", async (e) => {
+  const b = e.target.closest("button");
+  if (!b) return;
+  if (b.dataset.ptab) {
+    portal.tab = b.dataset.ptab;
+    return renderPortal(false);
+  }
+  // --- pagos informados ---
+  if (b.dataset.ppVer) {
+    const img = await invoke("portal_imagen", { que: "pagos", id: Number(b.dataset.ppVer) }).catch(() => null);
+    if (!img) return toast("Este pago no tiene comprobante adjunto");
+    openPrint(`<div style="padding:10px;max-width:900px"><img src="${img}" style="max-width:100%;display:block"></div>`, { titulo: "Comprobante informado" });
+  }
+  if (b.dataset.ppCobrar) {
+    const p = portal.pagos.find((x) => x.id === Number(b.dataset.ppCobrar));
+    if (!p) return;
+    const pers = periodosDesdeTexto(p.periodos);
+    abrirCobro(p.contrato_id, pers.length ? pers : null, {
+      fecha: p.fecha, metodo: p.metodo, notas: p.nota ? `Informado por el portal: ${p.nota}` : "",
+      onRegistrado: async (pagoId) => {
+        await invoke("portal_actualizar", { que: "pagos", id: p.id, cambios: { estado: "confirmado", pago_id: pagoId, respuesta: "Pago confirmado. ¡Gracias!", revisado: usuarioNombre() } });
+        await cargarPortal();
+        if ($("view-portal").classList.contains("active")) renderPortal(false);
+      },
+    });
+  }
+  if (b.dataset.ppRechazar) {
+    const motivo = prompt("Motivo (lo ve el inquilino):", "No encontramos la transferencia. Por favor comunicate con nosotros.");
+    if (motivo === null) return;
+    await call("portal_actualizar", { que: "pagos", id: Number(b.dataset.ppRechazar), cambios: { estado: "rechazado", respuesta: motivo, revisado: usuarioNombre() } });
+    await renderPortal();
+  }
+  // --- reclamos ---
+  if (b.dataset.recFoto) {
+    const img = await invoke("portal_imagen", { que: "reclamos", id: Number(b.dataset.recFoto) }).catch(() => null);
+    if (!img) return toast("Este reclamo no tiene foto");
+    openPrint(`<div style="padding:10px;max-width:900px"><img src="${img}" style="max-width:100%;display:block"></div>`, { titulo: "Foto del reclamo" });
+  }
+  if (b.dataset.recGuardar) {
+    const id = Number(b.dataset.recGuardar);
+    await call("portal_actualizar", {
+      que: "reclamos", id,
+      cambios: { estado: document.querySelector(`[data-rec-estado="${id}"]`).value, respuesta: document.querySelector(`[data-rec-resp="${id}"]`).value.trim() || null, actualizado: new Date().toISOString() },
+    });
+    toast("Reclamo actualizado: el inquilino ya lo ve");
+    await renderPortal();
+  }
+  // --- avisos ---
+  if (b.id === "av-crear") {
+    const titulo = $("av-titulo").value.trim();
+    if (!titulo) return toast("Escribí el título del aviso", true);
+    await call("portal_crear_aviso", { titulo, texto: $("av-texto").value, inquilinoId: $("av-para").value ? Number($("av-para").value) : null });
+    toast("Aviso publicado en el portal");
+    await renderPortal();
+  }
+  if (b.dataset.avisoToggle) {
+    await call("portal_actualizar", { que: "avisos", id: Number(b.dataset.avisoToggle), cambios: { activo: b.dataset.activo !== "1" } });
+    await renderPortal();
+  }
+  // --- links ---
+  const inqId = Number(b.dataset.plEnviar || b.dataset.plCopiar || b.dataset.plRenovar || 0);
+  if (inqId) {
+    const renovar = !!b.dataset.plRenovar;
+    if (renovar && !confirm("¿Cambiar el link? El link anterior deja de funcionar y hay que mandarle el nuevo.")) return;
+    const token = await call("portal_crear_acceso", { inquilinoId: inqId, token: nuevoCodigoPortal(), renovar });
+    const link = linkPortal(token);
+    if (b.dataset.plCopiar) {
+      await copiarTexto(link);
+      toast("Link copiado");
+    } else {
+      const c = contratosActivos().find((x) => x.inquilino_id === inqId);
+      const datos = { ...datosBaseMensaje(), nombre: primerNombre(c?.inquilino_nombre || inquilinoNombre(inqId)), link };
+      await enviarWhatsapp({ telefono: c?.inquilino_telefono, nombre: c?.inquilino_nombre, contrato_id: c?.id ?? null, tipo: "mensaje", referencia: "portal", mensaje: completarPlantilla(cfg("plantilla_portal"), datos) });
+    }
+    await cargarPortal();
+    renderPortal(false);
+  }
+});

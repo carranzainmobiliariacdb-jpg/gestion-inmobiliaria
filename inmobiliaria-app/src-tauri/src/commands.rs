@@ -240,7 +240,7 @@ pub async fn hay_configuracion_conexion<R: tauri::Runtime>(app: tauri::AppHandle
         return Ok(true);
     }
     if let (Some(url), Some(anon_key)) = (SUPABASE_URL_DE_FABRICA, SUPABASE_ANON_KEY_DE_FABRICA) {
-        conectar_y_guardar(&app, &state, SupabaseConfig { url: url.to_string(), anon_key: anon_key.to_string() }).await?;
+        conectar_y_guardar(&app, &state, SupabaseConfig { url: url.to_string(), anon_key: anon_key.to_string(), clave_oficina: None }).await?;
         return Ok(true);
     }
     Ok(false)
@@ -248,8 +248,59 @@ pub async fn hay_configuracion_conexion<R: tauri::Runtime>(app: tauri::AppHandle
 
 #[tauri::command]
 pub async fn configurar_conexion<R: tauri::Runtime>(app: tauri::AppHandle<R>, state: State<'_, DbState>, url: String, anon_key: String) -> Result<(), String> {
-    let config = SupabaseConfig { url: crate::config::limpiar(&url), anon_key: crate::config::limpiar(&anon_key) };
+    let data_dir = app.path().app_data_dir().map_err(map_err)?;
+    let clave_oficina = crate::config::leer_guardada(&data_dir).and_then(|c| c.clave_oficina);
+    let config = SupabaseConfig { url: crate::config::limpiar(&url), anon_key: crate::config::limpiar(&anon_key), clave_oficina };
     conectar_y_guardar(&app, &state, config).await
+}
+
+/// Configuración de conexión en uso (guardada o de fábrica).
+fn config_en_uso<R: tauri::Runtime>(app: &tauri::AppHandle<R>) -> Option<SupabaseConfig> {
+    let data_dir = app.path().app_data_dir().ok()?;
+    crate::config::leer_guardada(&data_dir).or_else(|| match (SUPABASE_URL_DE_FABRICA, SUPABASE_ANON_KEY_DE_FABRICA) {
+        (Some(url), Some(anon_key)) => Some(SupabaseConfig { url: url.to_string(), anon_key: anon_key.to_string(), clave_oficina: None }),
+        _ => None,
+    })
+}
+
+/// Guarda en esta PC la clave de la oficina (service_role). Se valida que
+/// sea la clave privada y que pueda leer la base antes de guardarla.
+#[tauri::command]
+pub async fn guardar_clave_oficina<R: tauri::Runtime>(app: tauri::AppHandle<R>, state: State<'_, DbState>, clave: String) -> Result<(), String> {
+    let clave = crate::config::limpiar(&clave);
+    match crate::config::rol_de_clave(&clave).as_deref() {
+        Some("service_role") | Some("secret") => {}
+        Some("anon") | Some("publishable") => {
+            return Err("Esa es la clave pública (anon). Hace falta la clave «service_role» (o «secret»), la que dice que no se comparte.".into())
+        }
+        _ => return Err("No parece una clave de Supabase. Copiá la clave «service_role» completa (empieza con eyJ…) o la «secret» (sb_secret_…).".into()),
+    }
+    let mut config = config_en_uso(&app).ok_or("Primero tiene que estar configurada la conexión con Supabase")?;
+    config.clave_oficina = Some(clave);
+    let cliente = Cliente::nuevo(&config);
+    cliente
+        .select::<Value>("usuarios", "select=id&limit=1")
+        .await
+        .map_err(|e| format!("La clave no funcionó con esta base: {}", e))?;
+    conectar_y_guardar(&app, &state, config).await
+}
+
+/// Estado de la seguridad / portal para el frontend.
+#[tauri::command]
+pub async fn estado_seguridad<R: tauri::Runtime>(app: tauri::AppHandle<R>, state: State<'_, DbState>) -> Result<Value, String> {
+    let config = config_en_uso(&app);
+    let cliente = obtener_cliente(&state).await?;
+    let tiene_clave = matches!(cliente.rol().as_deref(), Some("service_role") | Some("secret"));
+    let acceso = cliente.select::<Value>("usuarios", "select=id&limit=1").await.is_ok();
+    let activa = cliente.rpc("seguridad_activa", &json!({})).await.ok().and_then(|v| v.as_bool()).unwrap_or(false);
+    let portal = cliente.select::<Value>("portal_accesos", "select=token&limit=1").await.is_ok();
+    Ok(json!({
+        "clave_oficina": tiene_clave,
+        "acceso": acceso,
+        "seguridad_activa": activa,
+        "portal_tablas": portal,
+        "url": config.map(|c| crate::supabase::normalizar_url(&c.url)).unwrap_or_default(),
+    }))
 }
 
 // ---------- Propietarios, inquilinos, garantes e inmuebles ----------

@@ -1,0 +1,49 @@
+name: Publicar Portal de inquilinos
+
+on:
+  workflow_dispatch:
+  push:
+    paths:
+      - "portal/**"
+      - "inmobiliaria-app/src/util.js"
+      - "inmobiliaria-app/src/documentos.js"
+      - "inmobiliaria-app/src/styles.css"
+      - ".github/workflows/portal.yml"
+
+permissions:
+  contents: read
+  pages: write
+  id-token: write
+
+concurrency:
+  group: portal
+  cancel-in-progress: true
+
+jobs:
+  publicar:
+    runs-on: ubuntu-latest
+    environment:
+      name: github-pages
+      url: ${{ steps.deploy.outputs.page_url }}
+    steps:
+      - uses: actions/checkout@v4
+      - name: Armar el sitio
+        env:
+          U: ${{ secrets.INMOBILIARIA_SUPABASE_URL }}
+          A: ${{ secrets.INMOBILIARIA_SUPABASE_ANON_KEY }}
+        run: |
+          mkdir -p _site
+          cp portal/* _site/
+          cp inmobiliaria-app/src/util.js inmobiliaria-app/src/documentos.js inmobiliaria-app/src/logo-carranza.png _site/
+          cp inmobiliaria-app/src/styles.css _site/recibo.css
+          U=$(printf '%s' "$U" | tr -d '[:space:]' | sed -e 's#/rest/v1/*$##' -e 's#/*$##')
+          case "$U" in http*) ;; *) U="https://$U";; esac
+          A=$(printf '%s' "$A" | tr -d '[:space:]')
+          printf 'window.PORTAL_CONFIG = { url: "%s", anon: "%s" };\n' "$U" "$A" > _site/config.js
+          touch _site/.nojekyll
+      - uses: actions/configure-pages@v5
+      - uses: actions/upload-pages-artifact@v3
+        with:
+          path: _site
+      - id: deploy
+        uses: actions/deploy-pages@v4
