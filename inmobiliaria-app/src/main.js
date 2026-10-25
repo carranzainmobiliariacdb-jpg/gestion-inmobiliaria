@@ -3,7 +3,7 @@ import {
   montoEnLetras, telefonoWhatsapp, enlaceWhatsapp, completarPlantilla, primerNombre, serieIpcCompleta, calcularIpc,
 } from "./util.js";
 import { leerCodigoDni, interpretarCodigoDni, leerMrzDni, comprimirFoto, calcularCuil } from "./dni.js";
-import { htmlRecibo, htmlLiquidacion, htmlActaFotos, totalesRecibo, totalesLiquidacion, pagoCombinado, periodosDeRecibo, htmlConstanciaServicio } from "./documentos.js";
+import { htmlRecibo, htmlLiquidacion, htmlActaFotos, totalesRecibo, totalesLiquidacion, pagoCombinado, periodosDeRecibo, htmlConstanciaServicio, htmlResumenAlquileres } from "./documentos.js";
 import { VARIABLES as VARIABLES_MODELO, MODELOS_BASE, valoresContrato, completarModelo, htmlParaWord } from "./modelos.js";
 
 const invoke = window.__TAURI__.core.invoke;
@@ -3526,7 +3526,8 @@ const VARIABLES = {
 async function renderConfig() {
   document.querySelectorAll("#cfg-tabs .tab").forEach((t) => t.classList.toggle("active", t.dataset.tab === cfgTab));
   const body = $("cfg-body");
-  $("cfg-guardar").classList.toggle("hidden", cfgTab === "ipc");
+  $("cfg-guardar").classList.toggle("hidden", cfgTab === "ipc" || cfgTab === "respaldo");
+  if (cfgTab === "respaldo") return renderRespaldo(body);
   if (cfgTab === "inmobiliaria") {
     const logo = cfgBorrador.recibo_logo ?? cfg("recibo_logo");
     body.innerHTML = `<div class="cfg-grid">
@@ -3824,6 +3825,7 @@ async function entrarAlApp(usuario) {
   await loadAll();
   mostrarAlertaInicio();
   revisionAutomaticaServicios();
+  respaldoAutomatico();
 }
 
 // ---------- Alerta al iniciar: qué vence o se actualiza el próximo mes ----------
@@ -4108,3 +4110,127 @@ document.addEventListener("click", async (e) => {
     toast("Se usa la carpeta Documentos\\Carranza Inmobiliaria");
   }
 });
+
+
+// ---------- RESPALDO (Excel + PDF resumen + JSON, a la carpeta de la nube) ----------
+
+const local = {
+  get: (k, d = "") => {
+    try {
+      return localStorage.getItem(k) ?? d;
+    } catch {
+      return d;
+    }
+  },
+  set: (k, v) => {
+    try {
+      localStorage.setItem(k, v);
+    } catch {}
+  },
+};
+
+function datosResumenAlquileres() {
+  const deudas = new Map((state.dashboard?.deudas || []).map((d) => [d.contrato_id, d]));
+  const filas = contratosActivos()
+    .sort((a, b) => (a.inmueble_codigo ?? 1e9) - (b.inmueble_codigo ?? 1e9))
+    .map((c) => {
+      const ult = pagosDe(c.id).sort((a, b) => b.periodo.localeCompare(a.periodo))[0];
+      const d = deudas.get(c.id);
+      return {
+        cod: c.inmueble_codigo, inmueble: c.inmueble_direccion, inquilino: c.inquilino_nombre, telefono: c.inquilino_telefono,
+        propietario: c.propietario_nombre, contrato: c.numero ?? c.id, inicio: c.fecha_inicio, fin: c.fecha_fin, monto: Number(c.monto_vigente || 0),
+        ultimo: ult ? periodoTitulo(ult.periodo) : "", deuda: d ? Number(d.monto_adeudado || 0) : 0, periodosDeuda: d ? periodosTexto(d.periodos_impagos) : "",
+      };
+    });
+  const totales = { contratos: filas.length, mensual: filas.reduce((a, f) => a + f.monto, 0), conDeuda: filas.filter((f) => f.deuda).length, deuda: filas.reduce((a, f) => a + f.deuda, 0) };
+  const tabla = [
+    ["Código", "Inmueble", "Inquilino", "Teléfono", "Propietario", "Contrato N°", "Inicio", "Fin", "Alquiler vigente", "Último período pagado", "Deuda vencida", "Períodos adeudados"],
+    ...filas.map((f) => [f.cod ?? "", f.inmueble, f.inquilino, f.telefono || "", f.propietario, String(f.contrato), f.inicio, f.fin, f.monto, f.ultimo, f.deuda, f.periodosDeuda]),
+  ];
+  return { filas, totales, tabla };
+}
+
+async function hacerRespaldo({ silencioso = false } = {}) {
+  const carpeta = local.get("carpeta_respaldo");
+  if (!carpeta) {
+    if (!silencioso) toast("Primero elegí la carpeta de tu nube en Configuración → Respaldo", true);
+    return null;
+  }
+  if (!state.dashboard) await renderDashboard().catch(() => {});
+  const { filas, totales, tabla } = datosResumenAlquileres();
+  const html = await htmlAutocontenido(htmlResumenAlquileres({ filas, totales, fecha: fmtDate(hoyIso()) }, configCompleta()), true);
+  const r = await invoke("hacer_respaldo", { carpeta, resumenHtml: html, resumenFilas: tabla, conFotos: local.get("respaldo_fotos", "1") === "1" });
+  local.set("respaldo_ultimo", r.fecha);
+  local.set("respaldo_ultimo_carpeta", r.carpeta);
+  local.set("respaldo_ultimo_archivo", r.archivos[0] || "");
+  if (!silencioso) toast("Respaldo guardado en tu nube");
+  return r;
+}
+
+function textoUltimoRespaldo() {
+  const u = local.get("respaldo_ultimo");
+  return u ? `Último respaldo en esta PC: <b>${esc(u)}</b><br/>${local.get("respaldo_ultimo_archivo") ? botonesArchivo(local.get("respaldo_ultimo_archivo")) : ""}` : "Todavía no se hizo ningún respaldo desde esta PC.";
+}
+
+async function renderRespaldo(body) {
+  const carpeta = local.get("carpeta_respaldo");
+  const nubes = await invoke("carpetas_nube").catch(() => []);
+  body.innerHTML = `<div class="cfg-grid"><div class="panel respaldo-panel"><h3>Respaldo de todos los datos</h3>
+    <p class="hint">Guarda en la carpeta de tu nube (Google Drive, OneDrive o Dropbox instalado en la PC) una carpeta <b>Respaldos Gestión Inmobiliaria</b> con:
+    un <b>Excel</b> con todos los datos (alquileres activos, propietarios, inquilinos, garantes, inmuebles, contratos, cobros, liquidaciones, aumentos, servicios…),
+    un <b>PDF</b> con el resumen de los alquileres y su deuda, el archivo <b>datos-completos.json</b> para poder restaurar, y las <b>fotos</b> de los inmuebles. La nube lo sube sola.</p>
+    <div class="form-field full"><label>Carpeta de la nube</label>
+      <div class="carpeta-fila"><code id="resp-carpeta">${esc(carpeta || "Sin elegir")}</code><button type="button" class="btn-secondary btn-sm" id="resp-elegir">Elegir carpeta…</button></div>
+      ${nubes.length ? `<div class="respaldo-nubes"><small class="field-hint">Encontré en esta PC:</small>${nubes.map((n) => `<button type="button" class="btn-secondary btn-sm" data-resp-nube="${esc(n.ruta)}">☁ ${esc(n.nombre)} <small>(${esc(n.ruta)})</small></button>`).join("")}</div>` : `<small class="field-hint">No encontré Google Drive, OneDrive ni Dropbox instalados. Si tu nube es Google Drive, instalá «Google Drive para computadoras» y elegí la carpeta «Mi unidad».</small>`}
+    </div>
+    <div class="form-field full respaldo-opciones"><label><input type="checkbox" id="resp-auto" ${local.get("respaldo_auto", "1") === "1" ? "checked" : ""}/> Hacer un respaldo automático por semana (al abrir el programa)</label>
+      <label><input type="checkbox" id="resp-fotos" ${local.get("respaldo_fotos", "1") === "1" ? "checked" : ""}/> Incluir las fotos de los inmuebles (sólo copia las nuevas)</label></div>
+    <button type="button" class="btn-primary" id="resp-ahora">Hacer respaldo ahora</button>
+    <div class="respaldo-estado" id="resp-estado">${textoUltimoRespaldo()}</div>
+  </div></div>`;
+  const elegir = (ruta) => {
+    local.set("carpeta_respaldo", ruta);
+    $("resp-carpeta").textContent = ruta;
+    toast("Carpeta de respaldo guardada para esta PC");
+  };
+  body.querySelectorAll("[data-resp-nube]").forEach((b) => b.addEventListener("click", () => elegir(b.dataset.respNube)));
+  $("resp-elegir").addEventListener("click", async () => {
+    const r = await invoke("elegir_carpeta", { actual: local.get("carpeta_respaldo") || null }).catch((e) => (toast(String(e), true), null));
+    if (r) elegir(r);
+  });
+  $("resp-auto").addEventListener("change", (e) => local.set("respaldo_auto", e.target.checked ? "1" : "0"));
+  $("resp-fotos").addEventListener("change", (e) => local.set("respaldo_fotos", e.target.checked ? "1" : "0"));
+  $("resp-ahora").addEventListener("click", async () => {
+    const b = $("resp-ahora");
+    b.disabled = true;
+    $("resp-estado").innerHTML = "Armando el respaldo… (puede tardar un minuto si hay muchas fotos)";
+    try {
+      const r = await hacerRespaldo();
+      if (r)
+        $("resp-estado").innerHTML = `✓ Respaldo guardado en <b>${esc(r.carpeta)}</b><br/>${r.tablas.map((t) => `${esc(t.tabla)}: ${t.filas}`).join(" · ")}${r.fotos_nuevas ? ` · ${r.fotos_nuevas} fotos nuevas` : ""}
+          ${r.errores.length ? `<br/>⚠ ${r.errores.map(esc).join("<br/>⚠ ")}` : ""}<br/>${botonesArchivo(r.archivos[0])}`;
+      else $("resp-estado").innerHTML = textoUltimoRespaldo();
+    } catch (e) {
+      $("resp-estado").innerHTML = `⚠ No se pudo hacer el respaldo: ${esc(String(e))}`;
+    } finally {
+      b.disabled = false;
+    }
+  });
+}
+
+/** Al abrir el programa: si pasó una semana desde el último respaldo, lo hace solo. */
+function respaldoAutomatico() {
+  if (local.get("respaldo_auto", "1") !== "1" || !local.get("carpeta_respaldo")) return;
+  const u = local.get("respaldo_ultimo");
+  const dias = u ? (Date.now() - new Date(u.replace(" ", "T")).getTime()) / 86400000 : 999;
+  if (dias < 7) return;
+  setTimeout(async () => {
+    try {
+      const r = await hacerRespaldo({ silencioso: true });
+      if (r) toast("Se hizo el respaldo semanal en tu nube");
+    } catch (e) {
+      console.error("Respaldo automático:", e);
+      toast("No se pudo hacer el respaldo semanal: revisá Configuración → Respaldo", true);
+    }
+  }, 20000);
+}

@@ -570,3 +570,15 @@ tr.agua-hecha { background: #f6fbf7; }
 .dolar-tit { font-weight: 700; }
 .dolar-sub { font-size: 11px; color: var(--text-muted); }
 @media (max-width: 1100px) { .dolar-widget { min-width: 0; margin-right: 8px; } }
+
+.doc-resumen { width: 277mm; }
+.doc-resumen .liq-tabla td { vertical-align: top; }
+.respaldo-nubes { display: flex; flex-wrap: wrap; gap: 6px; margin-top: 6px; }
+.respaldo-estado { margin-top: 10px; padding: 10px 12px; border-radius: 8px; background: var(--panel-2); border: 1px solid var(--border); font-size: 13px; line-height: 1.5; }
+.respaldo-panel { padding: 20px 22px; max-width: 900px; display: flex; flex-direction: column; gap: 12px; }
+.respaldo-panel .hint { margin: 0; }
+.respaldo-nubes button { max-width: 100%; white-space: normal; text-align: left; }
+.respaldo-opciones label { display: flex; align-items: center; gap: 8px; font-weight: 500; margin: 2px 0; }
+.respaldo-opciones input { width: auto; margin: 0; }
+.respaldo-panel #resp-ahora { align-self: flex-start; }
+.cfg-grid .respaldo-panel { grid-column: 1 / -1; }

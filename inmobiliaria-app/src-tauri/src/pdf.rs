@@ -78,7 +78,7 @@ pub async fn generar_pdf(html: String, nombre: String) -> Result<String, String>
     generar_pdf_temporal(&html, &nombre)
 }
 
-fn generar_pdf_temporal(html: &str, nombre: &str) -> Result<String, String> {
+pub(crate) fn generar_pdf_temporal(html: &str, nombre: &str) -> Result<String, String> {
     let dir = carpeta_salida().map_err(|e| format!("No se pudo crear la carpeta de PDFs: {}", e))?;
     let base = nombre_seguro(nombre);
     let html_path = dir.join(format!("{}.html", base));
@@ -227,8 +227,9 @@ pub async fn mostrar_en_carpeta(ruta: String) -> Result<(), String> {
 #[tauri::command]
 pub async fn abrir_pdf<R: tauri::Runtime>(app: tauri::AppHandle<R>, ruta: String) -> Result<(), String> {
     use tauri_plugin_opener::OpenerExt;
-    if !ruta.to_lowercase().ends_with(".pdf") || !Path::new(&ruta).exists() {
-        return Err("No se encontró el PDF".into());
+    let r = ruta.to_lowercase();
+    if !(r.ends_with(".pdf") || r.ends_with(".xlsx")) || !Path::new(&ruta).exists() {
+        return Err("No se encontró el archivo".into());
     }
     app.opener().open_path(ruta, None::<&str>).map_err(|e| e.to_string())
 }

@@ -8,6 +8,7 @@ mod servicios;
 mod carga;
 mod pdf;
 mod dolar;
+mod respaldo;
 mod supabase;
 
 pub use commands::DbState;
@@ -121,6 +122,8 @@ pub fn manejador<R: tauri::Runtime>() -> impl Fn(tauri::ipc::Invoke<R>) -> bool 
         pdf::elegir_carpeta,
         pdf::pegar_pdf_whatsapp,
         dolar::cotizacion_dolar,
+        respaldo::hacer_respaldo,
+        respaldo::carpetas_nube,
     ]
 }
 

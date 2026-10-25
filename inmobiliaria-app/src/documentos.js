@@ -296,3 +296,31 @@ export function htmlConstanciaServicio({ f, servicio, empresa, fuente, inmuebles
     <div class="liq-pie">Impreso: ${fmtDate(hoy || hoyIso())}</div>
   </div>`;
 }
+
+
+/** Resumen de alquileres activos para el respaldo (A4 apaisado).
+ *  filas: [{cod, inmueble, inquilino, telefono, propietario, contrato, inicio, fin, monto, ultimo, deuda, periodosDeuda}] */
+export function htmlResumenAlquileres({ filas, fecha, totales }, cfg) {
+  const tr = filas
+    .map(
+      (f) => `<tr${f.deuda ? ' class="cs-fila-venc"' : ""}><td><b>${esc(f.cod ?? "")}</b></td><td>${esc(f.inmueble)}</td><td>${esc(f.inquilino)}<br/><small>${esc(f.telefono || "")}</small></td>
+      <td>${esc(f.propietario)}</td><td>${esc(f.contrato ?? "")}</td><td>${fmtDate(f.inicio)}<br/>${fmtDate(f.fin)}</td><td class="num">${n0(f.monto)}</td>
+      <td>${esc(f.ultimo || "—")}</td><td class="num">${f.deuda ? `<b>${n0(f.deuda)}</b><br/><small>${esc(f.periodosDeuda)}</small>` : "Al día"}</td></tr>`
+    )
+    .join("");
+  return `<div class="doc doc-acta doc-resumen">
+    ${encabezado(cfg, "Respaldo — resumen de alquileres")}
+    <div class="acta-cuerpo">
+      <h2>Alquileres activos al ${esc(fecha)}</h2>
+      <div class="acta-datos">
+        <div><label>Contratos activos:</label> <b>${totales.contratos}</b></div>
+        <div><label>Alquiler mensual total:</label> <b>${money(totales.mensual)}</b></div>
+        <div><label>Contratos con deuda:</label> <b>${totales.conDeuda}</b></div>
+        <div><label>Deuda vencida total:</label> <b>${money(totales.deuda)}</b></div>
+      </div>
+      <table class="liq-tabla"><thead><tr><th>Cód.</th><th>Inmueble</th><th>Inquilino</th><th>Propietario</th><th>Contrato</th><th>Inicio / fin</th><th class="num">Alquiler vigente</th><th>Último pago</th><th class="num">Deuda</th></tr></thead>
+      <tbody>${tr}</tbody></table>
+      <p class="cs-nota">Respaldo generado por Gestión Inmobiliaria. Junto a este PDF están el Excel con todos los datos (una hoja por tabla) y el archivo datos-completos.json para restaurar.</p>
+    </div>
+  </div>`;
+}
