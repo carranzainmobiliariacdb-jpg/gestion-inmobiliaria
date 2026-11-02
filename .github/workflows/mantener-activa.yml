@@ -1,0 +1,36 @@
+name: Mantener activa la base de datos
+
+# Supabase (plan gratis) pausa el proyecto si pasa una semana sin uso.
+# Esto le hace una consulta mínima cada 3 días para que nunca se pause.
+
+on:
+  schedule:
+    - cron: "17 13 */3 * *"
+  workflow_dispatch:
+
+permissions:
+  contents: read
+
+jobs:
+  despertar:
+    runs-on: ubuntu-latest
+    steps:
+      - name: Consultar la base
+        env:
+          U: ${{ secrets.INMOBILIARIA_SUPABASE_URL }}
+          A: ${{ secrets.INMOBILIARIA_SUPABASE_ANON_KEY }}
+        run: |
+          U=$(printf '%s' "$U" | tr -d '[:space:]' | sed -e 's#/rest/v1/*$##' -e 's#/*$##')
+          case "$U" in http*) ;; *) U="https://$U";; esac
+          A=$(printf '%s' "$A" | tr -d '[:space:]')
+          H1="apikey: $A"; H2="Authorization: Bearer $A"
+          # Con el portal activado: función pública. Sin activar: tabla de configuración.
+          c1=$(curl -s -o /dev/null -w '%{http_code}' -X POST "$U/rest/v1/rpc/seguridad_activa" -H "$H1" -H "$H2" -H 'Content-Type: application/json' -d '{}' || echo 000)
+          c2=$(curl -s -o /dev/null -w '%{http_code}' "$U/rest/v1/configuracion?select=clave&limit=1" -H "$H1" -H "$H2" || echo 000)
+          echo "::notice title=Base de datos::respuestas $c1 / $c2"
+          if [ "$c1" = "200" ] || [ "$c2" = "200" ]; then
+            echo "La base respondió: queda activa."
+          else
+            echo "::error title=Base de datos::La base no respondió (¿proyecto pausado?). Entrá a supabase.com y tocá Restore project."
+            exit 1
+          fi
