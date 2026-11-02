@@ -185,7 +185,25 @@ impl PeticionConstruida {
 }
 
 fn error_de_red(e: reqwest::Error) -> ErrorSupabase {
-    ErrorSupabase { codigo: None, mensaje: format!("No se pudo comunicar con Supabase: {}", e) }
+    // reqwest sólo dice "error sending request": se agrega la causa real.
+    let mut detalle = e.to_string();
+    let mut fuente = std::error::Error::source(&e);
+    while let Some(f) = fuente {
+        detalle.push_str(" → ");
+        detalle.push_str(&f.to_string());
+        fuente = f.source();
+    }
+    let d = detalle.to_lowercase();
+    let pista = if d.contains("certificate") || d.contains("certificado") || d.contains("cert") || d.contains("expired") || d.contains("unknownissuer") || d.contains("schannel") || d.contains("tls") || d.contains("ssl") {
+        "Revisá que la FECHA y la HORA de esta PC sean correctas (si están mal, la conexión segura falla). Si tiene antivirus con «análisis HTTPS/web», probá desactivarlo un momento."
+    } else if d.contains("dns") || d.contains("resolve") || d.contains("no such host") || d.contains("nombre") {
+        "Esta PC no encuentra el servidor: revisá que tenga internet (abrí cualquier página en el navegador)."
+    } else if d.contains("timed out") || d.contains("timeout") || d.contains("connect") || d.contains("refused") {
+        "No se pudo llegar al servidor: revisá internet, el firewall o el antivirus de esta PC."
+    } else {
+        "Revisá la conexión a internet, la fecha y hora de la PC y el antivirus."
+    };
+    ErrorSupabase { codigo: None, mensaje: format!("No se pudo comunicar con Supabase. {} (Detalle técnico: {})", pista, detalle) }
 }
 
 /// Acepta la URL del proyecto como venga pegada: sin "https://", con
