@@ -5,6 +5,7 @@
 // la app (y crear nuevos pegando el texto de un contrato propio).
 
 import { esc, money, fmtDate, hoyIso, mesesEntre, montoEnLetras, numeroEnLetras, fechaLetras, fechaLarga } from "./util.js";
+import { MODELO_VIVIENDA_CARRANZA } from "./modelo-vivienda-carranza.js";
 
 // ---------- variables ----------
 
@@ -18,18 +19,18 @@ export const VARIABLES = [
   ]],
   ["Propietario (locador)", [
     ["propietario.nombre", "Nombre"], ["propietario.dni", "DNI"], ["propietario.cuit", "CUIT/CUIL"],
-    ["propietario.nacionalidad", "Nacionalidad"], ["propietario.estado_civil", "Estado civil"],
+    ["propietario.nacionalidad", "Nacionalidad"], ["propietario.estado_civil", "Estado civil"], ["propietario.nacimiento", "Fecha de nacimiento"],
     ["propietario.domicilio", "Domicilio"], ["propietario.localidad", "Localidad"],
     ["propietario.telefono", "Teléfono"], ["propietario.email", "Email"], ["propietario.datos_bancarios", "Datos bancarios"],
   ]],
   ["Inquilino (locatario)", [
     ["inquilino.nombre", "Nombre"], ["inquilino.dni", "DNI"], ["inquilino.cuit", "CUIT/CUIL"],
-    ["inquilino.nacionalidad", "Nacionalidad"], ["inquilino.estado_civil", "Estado civil"], ["inquilino.profesion", "Profesión"],
+    ["inquilino.nacionalidad", "Nacionalidad"], ["inquilino.estado_civil", "Estado civil"], ["inquilino.nacimiento", "Fecha de nacimiento"], ["inquilino.profesion", "Profesión"],
     ["inquilino.domicilio", "Domicilio"], ["inquilino.localidad", "Localidad"],
     ["inquilino.telefono", "Teléfono"], ["inquilino.email", "Email"],
   ]],
   ["Garantes", [
-    ["garantes.parrafo", "Párrafo con todos los garantes"], ["garantes.firmas", "Líneas de firma de garantes"],
+    ["garantes.parrafo", "Párrafo con todos los garantes"], ["garantes.firmas", "Líneas de firma de garantes"], ["garantes.solvencia", "Garantías/solvencia de todos"],
     ["garante1.nombre", "Garante 1: nombre"], ["garante1.dni", "Garante 1: DNI"], ["garante1.domicilio", "Garante 1: domicilio"], ["garante1.garantia", "Garante 1: garantía"],
     ["garante2.nombre", "Garante 2: nombre"], ["garante2.dni", "Garante 2: DNI"], ["garante2.domicilio", "Garante 2: domicilio"], ["garante2.garantia", "Garante 2: garantía"],
   ]],
@@ -51,7 +52,7 @@ export const VARIABLES = [
     ["contrato.fecha_fin", "Vencimiento (30/06/2029)"], ["contrato.fecha_fin_letras", "Vencimiento en letras"],
     ["contrato.plazo_meses", "Plazo en meses (36)"], ["contrato.plazo_letras", "Plazo en letras (treinta y seis)"],
     ["contrato.monto", "Alquiler inicial ($ 350.000,00)"], ["contrato.monto_letras", "Alquiler en letras"],
-    ["contrato.monto_vigente", "Alquiler vigente hoy"], ["contrato.dia_pago", "Paga hasta el día"], ["contrato.dia_pago_letras", "Día de pago en letras"],
+    ["contrato.monto_vigente", "Alquiler vigente hoy"], ["contrato.dia_pago", "Paga hasta el día"], ["contrato.dia_pago_letras", "Día de pago en letras"], ["contrato.dia_mora", "Mora desde el día"], ["contrato.dia_mora_letras", "Mora desde el día (letras)"],
     ["contrato.indice", "Índice de actualización"], ["contrato.frecuencia", "Actualiza cada (meses)"], ["contrato.frecuencia_letras", "Frecuencia en letras"],
     ["contrato.porcentaje_fijo", "% fijo de aumento"], ["contrato.interes_diario", "Interés diario por mora (%)"],
     ["contrato.deposito", "Depósito en garantía"], ["contrato.deposito_letras", "Depósito en letras"],
@@ -85,6 +86,7 @@ function persona(p) {
     cuit: p.cuit_cuil,
     nacionalidad: p.nacionalidad ? p.nacionalidad.toLowerCase() : "",
     estado_civil: p.estado_civil ? p.estado_civil.toLowerCase() : "",
+    nacimiento: p.fecha_nacimiento ? fmtDate(p.fecha_nacimiento) : "",
     profesion: p.profesion,
     domicilio: p.direccion,
     localidad: p.localidad,
@@ -127,6 +129,7 @@ export function valoresContrato({ contrato: c, propietario, inquilino, garantes 
     v["garantes.parrafo"] = "";
     v["garantes.firmas"] = "";
   }
+  v["garantes.solvencia"] = garantes.map((g) => [g.nombre, [g.tipo_garantia, g.detalle_garantia].filter(Boolean).join(": ")].filter(Boolean).join(" — ")).filter((x) => x.includes(" — ")).join("; ");
   // Si entre los garantes hay un «Seguro de caución», se arma su cláusula.
   const caucion = garantes.find((g) => /seguro de cauci[óo]n/i.test(g.tipo_garantia || ""));
   if (caucion) {
@@ -160,7 +163,7 @@ export function valoresContrato({ contrato: c, propietario, inquilino, garantes 
   poner("inmueble", {
     direccion: dir,
     localidad: inmueble.localidad,
-    provincia: inmueble.provincia,
+    provincia: inmueble.provincia || "Córdoba",
     tipo: inmueble.tipo ? inmueble.tipo.toLowerCase() : "",
     descripcion: desc.join(", "),
     nomenclatura: inmueble.nomenclatura_catastral,
@@ -193,6 +196,8 @@ export function valoresContrato({ contrato: c, propietario, inquilino, garantes 
       monto_vigente: money(c.monto_vigente),
       dia_pago: c.dia_pago,
       dia_pago_letras: numeroEnLetras(c.dia_pago),
+      dia_mora: Number(c.dia_pago) + 1,
+      dia_mora_letras: numeroEnLetras(Number(c.dia_pago) + 1),
       indice: NOMBRE_INDICE[c.tipo_actualizacion] || c.tipo_actualizacion,
       frecuencia: c.frecuencia_actualizacion_meses,
       frecuencia_letras: cantidad(c.frecuencia_actualizacion_meses),
@@ -263,6 +268,7 @@ const FIRMAS = `
 {{garantes.firmas}}`;
 
 export const MODELOS_BASE = [
+  MODELO_VIVIENDA_CARRANZA,
   {
     nombre: "Contrato de locación de vivienda",
     tipo: "Vivienda",

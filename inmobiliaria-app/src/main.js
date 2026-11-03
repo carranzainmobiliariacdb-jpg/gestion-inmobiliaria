@@ -5,6 +5,7 @@ import {
 import { leerCodigoDni, interpretarCodigoDni, leerMrzDni, comprimirFoto, calcularCuil } from "./dni.js";
 import { htmlRecibo, htmlLiquidacion, htmlActaFotos, totalesRecibo, totalesLiquidacion, pagoCombinado, periodosDeRecibo, htmlConstanciaServicio, htmlResumenAlquileres } from "./documentos.js";
 import { VARIABLES as VARIABLES_MODELO, MODELOS_BASE, valoresContrato, completarModelo, htmlParaWord } from "./modelos.js";
+import { MODELO_VIVIENDA_CARRANZA } from "./modelo-vivienda-carranza.js";
 
 const invoke = window.__TAURI__.core.invoke;
 
@@ -3283,6 +3284,15 @@ async function cargarModelos() {
     // Primera vez: se cargan los modelos base para tener de dónde partir.
     for (const m of MODELOS_BASE) await call("guardar_modelo", { modelo: m });
     modelos = await call("get_modelos");
+  }
+  // Modelo de vivienda de Carranza (v0.18.2): se agrega una sola vez a los modelos existentes.
+  if (cfg("modelo_vivienda_carranza") !== "1") {
+    if (!modelos.some((m) => m.nombre === MODELO_VIVIENDA_CARRANZA.nombre)) {
+      await call("guardar_modelo", { modelo: MODELO_VIVIENDA_CARRANZA });
+      modelos = await call("get_modelos");
+    }
+    await invoke("guardar_configuracion", { valores: { modelo_vivienda_carranza: "1" } }).catch(() => {});
+    state.config.modelo_vivienda_carranza = "1";
   }
   state.modelos = modelos;
   return modelos;
