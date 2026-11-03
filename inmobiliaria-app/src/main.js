@@ -3298,6 +3298,15 @@ async function cargarModelos() {
     await invoke("guardar_configuracion", { valores: { modelos_carranza_v2: "1", modelo_vivienda_carranza: "1" } }).catch(() => {});
     state.config.modelos_carranza_v2 = "1";
   }
+  // v0.18.4: si se borraron los modelos de Carranza, se vuelven a cargar una vez.
+  if (cfg("modelos_carranza_v3") !== "1") {
+    for (const nuevo of [MODELO_VIVIENDA_CARRANZA, MODELO_COMERCIAL_CARRANZA]) {
+      if (!modelos.some((m) => m.nombre === nuevo.nombre)) await call("guardar_modelo", { modelo: nuevo });
+    }
+    modelos = await call("get_modelos");
+    await invoke("guardar_configuracion", { valores: { modelos_carranza_v3: "1" } }).catch(() => {});
+    state.config.modelos_carranza_v3 = "1";
+  }
   state.modelos = modelos;
   return modelos;
 }
@@ -3343,6 +3352,14 @@ $("gen-generar").addEventListener("click", () => {
 });
 
 $("btn-nuevo-modelo").addEventListener("click", () => editarModelo(null));
+$("btn-restaurar-modelos").addEventListener("click", async () => {
+  const actuales = await call("get_modelos");
+  const faltan = MODELOS_BASE.filter((m) => !actuales.some((x) => x.nombre === m.nombre));
+  if (!faltan.length) return toast("Están todos los modelos");
+  for (const m of faltan) await call("guardar_modelo", { modelo: m });
+  toast(`Modelos restaurados: ${faltan.map((m) => m.nombre).join(", ")}`);
+  renderDocumentos();
+});
 
 document.getElementById("view-documentos").addEventListener("click", async (e) => {
   const b = e.target.closest("button");
