@@ -6,6 +6,7 @@
 
 import { esc, money, fmtDate, hoyIso, mesesEntre, montoEnLetras, numeroEnLetras, fechaLetras, fechaLarga } from "./util.js";
 import { MODELO_VIVIENDA_CARRANZA } from "./modelo-vivienda-carranza.js";
+import { MODELO_COMERCIAL_CARRANZA } from "./modelo-comercial-carranza.js";
 
 // ---------- variables ----------
 
@@ -269,50 +270,7 @@ const FIRMAS = `
 
 export const MODELOS_BASE = [
   MODELO_VIVIENDA_CARRANZA,
-  {
-    nombre: "Contrato de locación de vivienda",
-    tipo: "Vivienda",
-    contenido: `<h1>CONTRATO DE LOCACIÓN DE INMUEBLE CON DESTINO VIVIENDA</h1>
-<p>En la ciudad de {{hoy.lugar}}, Provincia de Córdoba, {{hoy.fecha_larga}}, entre <b>{{propietario.nombre}}</b>, DNI N° {{propietario.dni}}, CUIT/CUIL {{propietario.cuit}}, de nacionalidad {{propietario.nacionalidad}}, estado civil {{propietario.estado_civil}}, con domicilio en {{propietario.domicilio}}, {{propietario.localidad}}, en adelante "EL LOCADOR", representado en este acto por {{inmobiliaria.nombre}}, {{inmobiliaria.matricula}}; y <b>{{inquilino.nombre}}</b>, DNI N° {{inquilino.dni}}, CUIT/CUIL {{inquilino.cuit}}, de nacionalidad {{inquilino.nacionalidad}}, estado civil {{inquilino.estado_civil}}, de profesión {{inquilino.profesion}}, con domicilio en {{inquilino.domicilio}}, {{inquilino.localidad}}, en adelante "EL LOCATARIO", convienen en celebrar el presente contrato de locación, sujeto a las siguientes cláusulas y, en lo no previsto, a las disposiciones del Código Civil y Comercial de la Nación:</p>
-<p><b>PRIMERA – OBJETO:</b> EL LOCADOR da en locación a EL LOCATARIO, y éste acepta, el inmueble ubicado en {{inmueble.direccion}}, de la ciudad de {{inmueble.localidad}}, Provincia de {{inmueble.provincia}}, que consta de {{inmueble.descripcion}}. EL LOCATARIO declara conocer el inmueble y recibirlo en buen estado de conservación, limpieza y funcionamiento, conforme al acta de constatación y las fotografías que forman parte de este contrato.</p>
-<p><b>SEGUNDA – PLAZO:</b> El plazo de la locación se fija en {{contrato.plazo_letras}} ({{contrato.plazo_meses}}) meses, comenzando el {{contrato.fecha_inicio_letras}} y finalizando el {{contrato.fecha_fin_letras}}, fecha en la que EL LOCATARIO deberá restituir el inmueble libre de ocupantes y de cosas, sin necesidad de intimación alguna.</p>
-<p><b>TERCERA – PRECIO Y FORMA DE PAGO:</b> El alquiler mensual se fija en la suma de pesos {{contrato.monto_letras}} ({{contrato.monto}}), pagadero por mes adelantado del día 1 al día {{contrato.dia_pago_letras}} ({{contrato.dia_pago}}) de cada mes, en el domicilio de {{inmobiliaria.nombre}}, sito en {{inmobiliaria.direccion}}, {{inmobiliaria.localidad}}, o mediante transferencia a la cuenta que se indique, contra entrega del recibo correspondiente.</p>
-<p><b>CUARTA – ACTUALIZACIÓN:</b> El precio se actualizará cada {{contrato.frecuencia_letras}} ({{contrato.frecuencia}}) meses, conforme a la variación de {{contrato.indice}} correspondiente a los meses inmediatamente anteriores publicados a la fecha de cada actualización. {{inmobiliaria.nombre}} comunicará a EL LOCATARIO el nuevo importe antes de su vencimiento.</p>
-<p><b>QUINTA – MORA:</b> La mora en el pago se producirá de pleno derecho por el solo vencimiento de los plazos, sin necesidad de interpelación alguna. El pago fuera de término devengará un interés punitorio del {{contrato.interes_diario}} diario sobre el monto adeudado, desde el vencimiento hasta su efectivo pago.</p>
-<p><b>SEXTA – DESTINO:</b> El inmueble se destinará exclusivamente a vivienda de EL LOCATARIO y su grupo familiar, quedando prohibido darle otro destino, cederlo, subalquilarlo o transferir este contrato, total o parcialmente, sin conformidad previa y por escrito de EL LOCADOR.</p>
-<p><b>SÉPTIMA – DEPÓSITO EN GARANTÍA:</b> EL LOCATARIO entrega en este acto la suma de pesos {{contrato.deposito_letras}} ({{contrato.deposito}}) en concepto de depósito en garantía, que será devuelta al finalizar la locación, una vez restituido el inmueble y verificado que no existen deudas por alquileres, servicios, impuestos ni daños, en el monto equivalente al último alquiler pagado.</p>
-<p><b>OCTAVA – SERVICIOS, IMPUESTOS Y EXPENSAS:</b> Están a cargo de EL LOCATARIO los servicios de luz, agua, gas, teléfono e internet, las tasas que graven el uso del inmueble y las expensas ordinarias, si las hubiera ({{contrato.conceptos}}). Los impuestos que gravan la propiedad y las expensas extraordinarias están a cargo de EL LOCADOR. EL LOCATARIO deberá exhibir los comprobantes de pago cuando le sean requeridos.</p>
-<p><b>NOVENA – CONSERVACIÓN Y MEJORAS:</b> EL LOCATARIO se obliga a mantener el inmueble en el buen estado en que lo recibe y a comunicar de inmediato cualquier desperfecto. Las reparaciones originadas por el uso normal y por deterioros causados por EL LOCATARIO o sus dependientes serán a su cargo. No podrá realizar modificaciones ni mejoras sin autorización escrita de EL LOCADOR; las que realice quedarán en beneficio del inmueble sin derecho a reclamo alguno.</p>
-<p><b>DÉCIMA – RESCISIÓN ANTICIPADA:</b> EL LOCATARIO podrá resolver anticipadamente este contrato conforme al artículo 1221 del Código Civil y Comercial de la Nación, notificando su decisión en forma fehaciente con una anticipación no menor a treinta (30) días y abonando la indemnización que corresponda según dicha norma.</p>
-<p><b>UNDÉCIMA – RESTITUCIÓN:</b> Al vencimiento del contrato o su resolución, EL LOCATARIO restituirá el inmueble en el mismo estado en que lo recibió, salvo el desgaste por el uso normal, con las llaves y con los servicios pagos, firmándose el acta de entrega correspondiente.</p>
-<p><b>DUODÉCIMA – GARANTÍA:</b> {{garantes.parrafo}}, se constituye/n en fiador/es solidario/s, liso/s, llano/s y principal/es pagador/es de todas las obligaciones asumidas por EL LOCATARIO en el presente contrato, con renuncia a los beneficios de excusión y división, hasta la total restitución del inmueble y el pago de todo lo adeudado.</p>
-<p><b>DECIMOTERCERA – DOMICILIOS Y JURISDICCIÓN:</b> Las partes constituyen domicilio en los indicados en el encabezamiento, donde serán válidas todas las notificaciones, y se someten a la jurisdicción de {{inmobiliaria.jurisdiccion}}, renunciando a cualquier otro fuero.</p>
-<p><b>DECIMOCUARTA – SELLADO:</b> El impuesto de sellos que corresponda a este contrato será soportado por las partes en proporciones iguales.</p>
-<p><b>DECIMOQUINTA – SERVICIOS ATRASADOS Y RECONEXIÓN:</b> EL LOCATARIO y, en forma solidaria, sus fiadores, se obligan a pagar la totalidad de las facturas de luz, agua y gas y de cualquier otro servicio a su cargo, incluidas las que lleguen o se emitan con posterioridad a la finalización del contrato o a la restitución del inmueble, cuando correspondan a consumos efectuados durante la vigencia de la locación o imputables a su uso. Si por falta de pago u otra causa imputable a EL LOCATARIO se produjera el corte o la suspensión de cualquiera de dichos servicios, serán también a su exclusivo cargo —y de sus fiadores en forma solidaria— las deudas acumuladas, los recargos, intereses, multas, gastos administrativos, y la totalidad de los costos de rehabilitación, reconexión y de las obras, materiales y mano de obra que la empresa prestataria requiera para restablecer el servicio, debiendo entregar el inmueble al finalizar la locación con todos los servicios activos, pagos y en pleno funcionamiento.</p>
-{{caucion.clausula}}
-<p>En prueba de conformidad se firman tres (3) ejemplares de un mismo tenor y a un solo efecto, en el lugar y fecha indicados.</p>
-${FIRMAS}`,
-  },
-  {
-    nombre: "Contrato de locación comercial",
-    tipo: "Comercial",
-    contenido: `<h1>CONTRATO DE LOCACIÓN DE INMUEBLE CON DESTINO COMERCIAL</h1>
-<p>En la ciudad de {{hoy.lugar}}, Provincia de Córdoba, {{hoy.fecha_larga}}, entre <b>{{propietario.nombre}}</b>, DNI N° {{propietario.dni}}, CUIT/CUIL {{propietario.cuit}}, con domicilio en {{propietario.domicilio}}, {{propietario.localidad}}, en adelante "EL LOCADOR", representado por {{inmobiliaria.nombre}}, {{inmobiliaria.matricula}}; y <b>{{inquilino.nombre}}</b>, DNI N° {{inquilino.dni}}, CUIT {{inquilino.cuit}}, con domicilio en {{inquilino.domicilio}}, {{inquilino.localidad}}, en adelante "EL LOCATARIO", convienen el presente contrato de locación comercial:</p>
-<p><b>PRIMERA – OBJETO Y DESTINO:</b> EL LOCADOR da en locación el inmueble sito en {{inmueble.direccion}}, {{inmueble.localidad}}, que EL LOCATARIO destinará exclusivamente a la actividad comercial de ____________________, siendo a su exclusivo cargo la obtención de las habilitaciones municipales y demás permisos necesarios.</p>
-<p><b>SEGUNDA – PLAZO:</b> {{contrato.plazo_letras}} ({{contrato.plazo_meses}}) meses, desde el {{contrato.fecha_inicio_letras}} hasta el {{contrato.fecha_fin_letras}}.</p>
-<p><b>TERCERA – PRECIO:</b> Pesos {{contrato.monto_letras}} ({{contrato.monto}}) mensuales, más IVA si correspondiera, pagaderos por mes adelantado del 1 al {{contrato.dia_pago}} de cada mes en {{inmobiliaria.direccion}}, {{inmobiliaria.localidad}}.</p>
-<p><b>CUARTA – ACTUALIZACIÓN:</b> Cada {{contrato.frecuencia_letras}} ({{contrato.frecuencia}}) meses, según la variación de {{contrato.indice}}.</p>
-<p><b>QUINTA – MORA:</b> Automática, con un interés punitorio del {{contrato.interes_diario}} diario sobre lo adeudado.</p>
-<p><b>SEXTA – CARGAS:</b> Servicios, tasas por la actividad, expensas ordinarias y seguros del local y su contenido a cargo de EL LOCATARIO. Impuestos sobre la propiedad a cargo de EL LOCADOR.</p>
-<p><b>SÉPTIMA – DEPÓSITO:</b> Pesos {{contrato.deposito_letras}} ({{contrato.deposito}}), a devolver al finalizar la locación previa verificación del estado del inmueble y de la inexistencia de deudas.</p>
-<p><b>OCTAVA – MEJORAS:</b> Toda modificación requiere autorización escrita de EL LOCADOR y quedará a beneficio del inmueble.</p>
-<p><b>NOVENA – GARANTÍA:</b> {{garantes.parrafo}}, se constituye/n en fiador/es solidario/s y principal/es pagador/es de las obligaciones de EL LOCATARIO.</p>
-<p><b>DÉCIMA – SERVICIOS ATRASADOS Y RECONEXIÓN:</b> EL LOCATARIO y, en forma solidaria, sus fiadores, se obligan a pagar la totalidad de las facturas de luz, agua y gas y de cualquier otro servicio a su cargo, incluidas las que lleguen o se emitan con posterioridad a la finalización del contrato o a la restitución del inmueble, cuando correspondan a consumos efectuados durante la vigencia de la locación o imputables a su uso. Si por falta de pago u otra causa imputable a EL LOCATARIO se produjera el corte o la suspensión de cualquiera de dichos servicios, serán también a su exclusivo cargo —y de sus fiadores en forma solidaria— las deudas acumuladas, los recargos, intereses, multas, gastos administrativos y la totalidad de los costos de rehabilitación, reconexión y de las obras, materiales y mano de obra que la empresa prestataria requiera para restablecer el servicio, debiendo entregar el inmueble al finalizar la locación con todos los servicios activos, pagos y en pleno funcionamiento.</p>
-{{caucion.clausula}}
-<p><b>UNDÉCIMA – JURISDICCIÓN:</b> {{inmobiliaria.jurisdiccion}}.</p>
-<p>Se firman tres ejemplares de un mismo tenor en el lugar y fecha indicados.</p>
-${FIRMAS}`,
-  },
+  MODELO_COMERCIAL_CARRANZA,
   {
     nombre: "Fianza / garantía personal",
     tipo: "Garantía",
