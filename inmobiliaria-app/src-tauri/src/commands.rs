@@ -1255,6 +1255,8 @@ pub async fn base_actualizada(state: State<'_, DbState>) -> Result<bool, String>
         ("documentos_generados", "select=id&limit=1"),
         ("inmuebles", "select=servicio_luz_contrato&limit=1"),
         ("servicios_estado", "select=id&limit=1"),
+        ("honorarios", "select=id,plan_id,cuota&limit=1"),
+        ("honorarios_planes", "select=id&limit=1"),
     ];
     for (tabla, q) in chequeos {
         if cliente.select::<Value>(tabla, q).await.is_err() {

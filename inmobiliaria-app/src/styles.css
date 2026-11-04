@@ -588,3 +588,4 @@ tr.agua-hecha { background: #f6fbf7; }
 .portal-pasos { padding-left: 20px; line-height: 1.6; display: flex; flex-direction: column; gap: 14px; }
 .portal-pasos li.hecho > b { color: var(--success, #1d7a46); }
 #portal-tabs { margin-bottom: 14px; }
+.seccion-titulo { margin: 4px 0 10px; font-size: 14px; text-transform: uppercase; letter-spacing: 0.6px; color: var(--text-muted); }

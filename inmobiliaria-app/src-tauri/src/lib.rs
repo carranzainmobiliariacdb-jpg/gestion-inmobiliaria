@@ -10,6 +10,7 @@ mod pdf;
 mod dolar;
 mod respaldo;
 mod portal;
+mod honorarios;
 mod supabase;
 
 pub use commands::DbState;
@@ -126,6 +127,12 @@ pub fn manejador<R: tauri::Runtime>() -> impl Fn(tauri::ipc::Invoke<R>) -> bool 
         respaldo::hacer_respaldo,
         respaldo::carpetas_nube,
         portal::portal_listar,
+        honorarios::get_honorarios,
+        honorarios::registrar_honorario,
+        honorarios::eliminar_honorario,
+        honorarios::get_honorarios_planes,
+        honorarios::crear_honorario_plan,
+        honorarios::eliminar_honorario_plan,
         portal::portal_actualizar,
         portal::portal_crear_acceso,
         portal::portal_crear_aviso,

@@ -148,6 +148,63 @@ function mitadRecibo(r, cfg, copia) {
   </div>`;
 }
 
+/** Recibo de honorarios de la inmobiliaria (h = fila de honorarios; c = contrato o null). */
+function mitadHonorario(h, c, cfg, copia) {
+  const logo = cfg.recibo_logo || "logo-carranza.png";
+  const esOriginal = copia === "ORIGINAL";
+  const monto = Number(h.monto || 0);
+  const inmueble = c ? `${c.inmueble_codigo != null ? `<span class="rm-cod">${esc(c.inmueble_codigo)}</span> ` : ""}${esc(c.inmueble_direccion || "")}` : "";
+  return `
+  <div class="rm-mitad">
+    <div class="rm-cab">
+      <img class="rm-logo" src="${esc(logo)}" alt="" />
+      <div class="rm-marca">
+        <span class="rm-nombre">${esc((cfg.inmobiliaria_nombre || "CARRANZA").replace(/\s*inmobiliaria\s*/i, ""))}</span>
+        <span class="rm-sub">INMOBILIARIA</span>
+        <span class="rm-contacto">${esc(cfg.inmobiliaria_matricula || "")}${cfg.inmobiliaria_cuit ? ` · CUIT ${esc(cfg.inmobiliaria_cuit)}` : ""}</span>
+      </div>
+      <div class="rm-num">
+        <span class="rm-tipo">Recibo de honorarios</span>
+        <span class="rm-numero">N° ${esc(String(h.numero).padStart(6, "0"))}</span>
+        <span class="rm-x"><b>X</b> Documento no válido como factura</span>
+      </div>
+    </div>
+    <div class="rm-franja">
+      <div><label>Fecha</label><b>${fmtDate(h.fecha)}</b></div>
+      <div><label>Concepto</label><b>Honorarios</b></div>
+      <div><label>Contrato N°</label><b>${esc(c ? c.numero ?? c.id : "—")}</b></div>
+      <div><label>Vigencia</label><b>${c ? `${fmtDate(c.fecha_inicio)} al ${fmtDate(c.fecha_fin)}` : "—"}</b></div>
+    </div>
+    <div class="rm-datos">
+      <div class="rm-dato rm-full"><label>Recibí de</label><b>${esc(h.pagador_nombre || "")}</b>${[h.pagador_dni && `DNI/CUIT ${esc(h.pagador_dni)}`, h.pagador_telefono && `Tel. ${esc(h.pagador_telefono)}`].filter(Boolean).map((x) => `<small>${x}</small>`).join("")}</div>
+      ${c ? `<div class="rm-dato rm-full"><label>Propiedad</label><b>${inmueble}</b>${c.inmueble_localidad ? `<small>${esc(c.inmueble_localidad)}</small>` : ""}</div>` : ""}
+      ${h.pagador_tipo ? `<div class="rm-dato rm-full"><label>En carácter de</label><b>${esc({ inquilino: "Locatario", propietario: "Locador" }[h.pagador_tipo] || "—")}</b></div>` : ""}
+    </div>
+    <table class="rm-tabla">
+      <thead><tr><th>Concepto</th><th>Detalle</th><th class="num">Importe</th></tr></thead>
+      <tbody><tr><td><b>${esc(h.concepto)}</b></td><td>${esc(h.detalle || "")}</td><td class="num"><b>${n0(monto)}</b></td></tr></tbody>
+    </table>
+    <div class="rm-totales">
+      <div class="rm-ajustes">
+        ${h.metodo_pago ? `<div class="rm-pago"><span>Forma de pago</span><span>${esc(h.metodo_pago)}</span></div>` : ""}
+      </div>
+      <div class="rm-total"><span>TOTAL</span><b>${money(monto)}</b></div>
+    </div>
+    <div class="rm-letras">Son pesos ${montoEnLetras(monto).toLowerCase().replace(" cts.", "")}</div>
+    <div class="rm-extra">${h.notas ? `<div><b>Observaciones:</b> ${esc(h.notas)}</div>` : ""}</div>
+    <div class="rm-pie">
+      <span class="rm-copia ${esOriginal ? "rm-original" : ""}">${copia}</span>
+      <div class="rm-firma">${esOriginal ? "Firma y sello" : "Recibí copia — firma"}</div>
+    </div>
+    <div class="rm-legal">${[cfg.inmobiliaria_direccion && `${esc(cfg.inmobiliaria_direccion)}${cfg.inmobiliaria_localidad ? `, ${esc(cfg.inmobiliaria_localidad)}` : ""}`, cfg.inmobiliaria_telefono && `Tel. ${esc(cfg.inmobiliaria_telefono)}`, cfg.wa_inmobiliaria && `WhatsApp ${esc(cfg.wa_inmobiliaria)}`, esc(cfg.inmobiliaria_email || "")].filter(Boolean).join(" · ")}
+      <span>Impreso ${fmtDate(hoyIso())}${h.usuario ? ` · ${esc(h.usuario)}` : ""}</span></div>
+  </div>`;
+}
+
+export function htmlReciboHonorario(h, c, cfg) {
+  return `<div class="doc doc-recibo-m">${mitadHonorario(h, c, cfg, "DUPLICADO")}<div class="rm-corte"></div>${mitadHonorario(h, c, cfg, "ORIGINAL")}</div>`;
+}
+
 /** Sólo el ORIGINAL (para el portal del inquilino). */
 export function htmlReciboOriginal(r, cfg) {
   return `<div class="doc doc-recibo-m doc-recibo-uno">${mitadRecibo(r, cfg, "ORIGINAL")}</div>`;

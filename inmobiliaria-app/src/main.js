@@ -1,9 +1,9 @@
 import {
-  esc, money, numero, fmtDate, hoyIso, periodoTexto, periodoTitulo, sumarMeses, mesDeContrato, vencimientoDe, diasEntre,
+  esc, money, numero, fmtDate, hoyIso, periodoTexto, periodoTitulo, sumarMeses, mesesEntre, mesDeContrato, vencimientoDe, diasEntre,
   montoEnLetras, telefonoWhatsapp, enlaceWhatsapp, completarPlantilla, primerNombre, serieIpcCompleta, calcularIpc,
 } from "./util.js";
 import { leerCodigoDni, interpretarCodigoDni, leerMrzDni, comprimirFoto, calcularCuil } from "./dni.js";
-import { htmlRecibo, htmlLiquidacion, htmlActaFotos, totalesRecibo, totalesLiquidacion, pagoCombinado, periodosDeRecibo, htmlConstanciaServicio, htmlResumenAlquileres } from "./documentos.js";
+import { htmlRecibo, htmlLiquidacion, htmlActaFotos, totalesRecibo, totalesLiquidacion, pagoCombinado, periodosDeRecibo, htmlConstanciaServicio, htmlResumenAlquileres, htmlReciboHonorario } from "./documentos.js";
 import { VARIABLES as VARIABLES_MODELO, MODELOS_BASE, valoresContrato, completarModelo, htmlParaWord } from "./modelos.js";
 import { MODELO_VIVIENDA_CARRANZA } from "./modelo-vivienda-carranza.js";
 import { MODELO_COMERCIAL_CARRANZA } from "./modelo-comercial-carranza.js";
@@ -50,6 +50,9 @@ const CONFIG_DEFECTO = {
   wa_inmobiliaria: "3468563371",
   wa_modo: "app",
   wa_pdf_auto: "enviar",
+  honorarios_porcentaje: "5",
+  plantilla_honorarios_cuota: "Hola {nombre}! Te recordamos que el {vencimiento} vence la cuota {cuota} de {concepto}: {monto}.\n{datos_pago}\nMuchas gracias. {inmobiliaria}",
+  plantilla_honorarios: "Hola {nombre}! Te enviamos el recibo N° {recibo} de {concepto} por {monto}. ¡Muchas gracias! {inmobiliaria}",
   portal_url: "https://carranzainmobiliariacdb-jpg.github.io/gestion-inmobiliaria/",
   plantilla_portal:
     "Hola {nombre}! Desde {inmobiliaria} te compartimos tu acceso personal al Portal del inquilino: ahí ves tu estado de cuenta, descargás tus recibos, informás pagos y hacés reclamos desde el celular.\n{link}\nEs personal: no lo compartas.",
@@ -154,6 +157,7 @@ function switchView(view) {
   if (view === "documentos") renderDocumentos();
   if (view === "servicios") renderServicios();
   if (view === "portal") renderPortal();
+  if (view === "honorarios") renderHonorarios();
 }
 
 // Buscadores de las tablas
@@ -576,6 +580,7 @@ async function loadAll() {
   await renderDashboard();
   actualizarBadges();
   cargarPortal().catch(() => {});
+  cargarHonorarios().catch(() => {});
 }
 
 function renderTodo() {
@@ -1549,7 +1554,7 @@ function actualizarBadges() {
 
 // ---------- Mensajes libres por WhatsApp ----------
 
-const TIPO_AVISO_TXT = { recordatorio: "Recordatorio", deuda: "Atraso", aumento: "Aumento", vencimiento: "Fin de contrato", cumple: "Cumpleaños", recibo: "Recibo", liquidacion: "Liquidación", mensaje: "Mensaje", servicio: "Servicio impago" };
+const TIPO_AVISO_TXT = { recordatorio: "Recordatorio", deuda: "Atraso", aumento: "Aumento", vencimiento: "Fin de contrato", cumple: "Cumpleaños", recibo: "Recibo", liquidacion: "Liquidación", mensaje: "Mensaje", servicio: "Servicio impago", honorarios: "Honorarios" };
 
 function destinatarioDe(tabla, p) {
   const rol = { propietarios: "Propietario", inquilinos: "Inquilino", garantes: "Garante" }[tabla];
@@ -3567,6 +3572,8 @@ const VARIABLES = {
   plantilla_cumple: ["nombre", "inmobiliaria"],
   plantilla_servicio: ["nombre", "inmueble", "servicio", "periodos", "vencimiento", "monto", "inmobiliaria"],
   plantilla_portal: ["nombre", "link", "inmobiliaria"],
+  plantilla_honorarios: ["nombre", "recibo", "concepto", "monto", "inmobiliaria"],
+  plantilla_honorarios_cuota: ["nombre", "cuota", "concepto", "vencimiento", "monto", "datos_pago", "inmobiliaria"],
 };
 
 async function renderConfig() {
@@ -3581,6 +3588,8 @@ async function renderConfig() {
         ${campoCfg("inmobiliaria_nombre", "Nombre", { full: true })}
         ${campoCfg("inmobiliaria_matricula", "Matrícula")}
         ${campoCfg("inmobiliaria_cuit", "CUIT")}
+        ${campoCfg("honorarios_porcentaje", "Honorarios: porcentaje sugerido (%)", { type: "number", hint: "Sólo como ayuda para calcular: el importe siempre se puede escribir a mano." })}
+        ${campoCfg("honorarios_numero_desde", "Numeración de recibos de honorarios desde", { type: "number", hint: "Opcional: para seguir la numeración que ya usabas." })}
         ${campoCfg("inmobiliaria_direccion", "Dirección")}
         ${campoCfg("inmobiliaria_localidad", "Localidad")}
         ${campoCfg("inmobiliaria_telefono", "Teléfono")}
@@ -3631,6 +3640,8 @@ async function renderConfig() {
       ["plantilla_cumple", "Cumpleaños"],
       ["plantilla_servicio", "Servicio impago (luz, gas, agua)"],
       ["plantilla_portal", "Link del Portal del inquilino"],
+      ["plantilla_honorarios", "Recibo de honorarios"],
+      ["plantilla_honorarios_cuota", "Recordatorio de cuota de honorarios"],
     ];
     body.innerHTML = `<div class="cfg-grid">
       <div class="panel"><h3>Datos generales</h3><div class="form-grid">
@@ -3845,7 +3856,7 @@ async function verificarBase() {
     return true;
   }
   try {
-    const partes = await Promise.all(["migracion-0.3.0.sql", "migracion-0.4.0.sql", "migracion-0.5.0.sql", "migracion-0.8.0.sql", "migracion-0.9.0.sql"].map(async (f) => (await fetch(f)).text()));
+    const partes = await Promise.all(["migracion-0.3.0.sql", "migracion-0.4.0.sql", "migracion-0.5.0.sql", "migracion-0.8.0.sql", "migracion-0.9.0.sql", "migracion-0.19.0.sql"].map(async (f) => (await fetch(f)).text()));
     $("migracion-sql").value = partes.join("\n\n");
   } catch {
     $("migracion-sql").value = "No se pudo leer el archivo de migración.";
@@ -4562,3 +4573,336 @@ $("portal-body").addEventListener("click", async (e) => {
     renderPortal(false);
   }
 });
+
+
+// ---------- HONORARIOS ALQUILERES ----------
+//
+// Cada honorario es un «plan» (pago único o en cuotas, con vencimientos).
+// Cada cobro de una cuota emite un recibo de honorarios con numeración
+// propia. Las cuotas que vencen avisan (número en el menú + lista arriba).
+
+let honorarios = [];
+let honorariosPlanes = [];
+const CONCEPTOS_HONORARIOS = [
+  ["celebracion", "Honorarios por celebración de contrato de locación"],
+  ["renovacion", "Honorarios por renovación de contrato de locación"],
+  ["administracion", "Honorarios por administración"],
+  ["otro", "Otro concepto"],
+];
+const QUIEN_TXT = { inquilino: "Inquilino", propietario: "Propietario", otro: "Otro" };
+
+/** Meses de un contrato (01/07/2026 al 30/06/2028 = 24). */
+function plazoMeses(c) {
+  let n = mesesEntre(c.fecha_inicio.slice(0, 7), c.fecha_fin.slice(0, 7)) + 1;
+  if (Number(c.fecha_fin.slice(8, 10)) <= Number(c.fecha_inicio.slice(8, 10))) n -= 1;
+  return Math.max(1, n);
+}
+/** "2026-11-10" + n meses (mismo día, o el último del mes). */
+function sumarMesesFecha(iso, n) {
+  const per = sumarMeses(iso.slice(0, 7), n);
+  return vencimientoDe(per, Number(iso.slice(8, 10)));
+}
+const redondear2 = (n) => Math.round(n * 100) / 100;
+
+/** Cuotas pendientes de todos los planes, con su plan. */
+function cuotasPendientes() {
+  return honorariosPlanes
+    .flatMap((p) => (p.cuotas || []).filter((c) => !c.recibo_id).map((c) => ({ plan: p, cuota: c })))
+    .sort((a, b) => String(a.cuota.vence).localeCompare(String(b.cuota.vence)));
+}
+
+async function cargarHonorarios() {
+  [honorarios, honorariosPlanes] = await Promise.all([call("get_honorarios").catch(() => []), invoke("get_honorarios_planes").catch(() => [])]);
+  const hoy = hoyIso();
+  const dias = Number(cfg("aviso_dias_antes") || 5);
+  const n = cuotasPendientes().filter((x) => diasEntre(hoy, x.cuota.vence) <= dias).length;
+  $("badge-honorarios").textContent = n;
+  $("badge-honorarios").classList.toggle("hidden", !n);
+}
+
+async function renderHonorarios() {
+  await cargarHonorarios();
+  // --- cuotas a cobrar ---
+  const hoy = hoyIso();
+  const pend = cuotasPendientes();
+  $("honorarios-cuotas").innerHTML = pend.length
+    ? `<div class="panel" style="padding:14px 16px;margin-bottom:16px"><h3 style="margin:0 0 10px">Cuotas a cobrar</h3>
+      <div class="table-wrap"><table class="data-table"><thead><tr><th>Vence</th><th>Quién paga</th><th>Concepto</th><th>Cuota</th><th class="num">Importe</th><th></th></tr></thead><tbody>${pend
+        .map(({ plan: p, cuota: c }) => {
+          const d = diasEntre(hoy, c.vence);
+          const pill = d < 0 ? `<span class="pill pill-danger">vencida hace ${-d} días</span>` : d <= Number(cfg("aviso_dias_antes") || 5) ? `<span class="pill pill-warning">${diasTexto(d)}</span>` : "";
+          const ctr = p.contrato_id ? byId(state.contratos, p.contrato_id) : null;
+          const enviado = ultimoAviso(p.contrato_id ?? null, "honorarios", `cuota:${p.id}:${c.n}`);
+          return `<tr><td>${fmtDate(c.vence)} ${pill}</td><td><b>${esc(p.pagador_nombre)}</b><span class="sub-line">${esc(QUIEN_TXT[p.pagador_tipo] || "")}${ctr ? ` · ${codHtml(ctr.inmueble_codigo)}${esc(ctr.inmueble_direccion)}` : ""}</span></td>
+            <td>${esc(p.concepto)}</td><td>${c.n} de ${(p.cuotas || []).length}</td><td class="num"><b>${money(c.monto)}</b></td>
+            <td class="actions">${enviado ? `<span class="aviso-enviado">✓ Avisado ${fmtDate(enviado.fecha)}</span>` : ""}<button class="btn-whatsapp btn-sm" data-hc-avisar="${p.id}:${c.n}">${ICONO_WA} Avisar</button><button class="btn-primary btn-sm" data-hc-cobrar="${p.id}:${c.n}">Cobrar</button></td></tr>`;
+        })
+        .join("")}</tbody></table></div></div>`
+    : "";
+  // --- recibos ---
+  const sel = $("filtro-honorarios-mes");
+  const meses = [...new Set(honorarios.map((h) => h.fecha.slice(0, 7)))].sort().reverse();
+  const elegido = sel.value || "";
+  sel.innerHTML = `<option value="">Todos los meses</option>` + meses.map((m) => `<option value="${m}" ${m === elegido ? "selected" : ""}>${periodoTitulo(m)}</option>`).join("");
+  const lista = honorarios.filter((h) => !elegido || h.fecha.startsWith(elegido));
+  $("honorarios-total").innerHTML = lista.length ? `Total cobrado: <b>${money(lista.reduce((a, h) => a + Number(h.monto || 0), 0))}</b>` : "";
+  $("tbl-honorarios").innerHTML = lista.length
+    ? lista
+        .map((h) => {
+          const c = h.contrato_id ? byId(state.contratos, h.contrato_id) : null;
+          const plan = h.plan_id ? honorariosPlanes.find((p) => p.id === h.plan_id) : null;
+          const nCuotas = plan ? (plan.cuotas || []).length : 0;
+          return `<tr><td><b>${esc(h.numero)}</b></td><td>${fmtDate(h.fecha)}</td>
+          <td><b>${esc(h.pagador_nombre)}</b><span class="sub-line">${esc(QUIEN_TXT[h.pagador_tipo] || "")}${c ? ` · ${codHtml(c.inmueble_codigo)}${esc(c.inmueble_direccion)}` : ""}</span></td>
+          <td>${esc(h.concepto)}${nCuotas > 1 ? `<span class="sub-line">Cuota ${h.cuota} de ${nCuotas}</span>` : ""}</td>
+          <td>${esc(h.metodo_pago || "-")}</td><td class="num"><b>${money(h.monto)}</b></td>
+          <td class="actions"><button class="btn-link" data-hon-ver="${h.id}">Ver recibo</button><button class="btn-link peligro" data-hon-borrar="${h.id}">Anular</button></td></tr>`;
+        })
+        .join("")
+    : vacio(7, "Todavía no hay recibos de honorarios");
+  aplicarBusqueda("tbl-honorarios");
+}
+$("filtro-honorarios-mes").addEventListener("change", renderHonorarios);
+$("btn-nuevo-honorario").addEventListener("click", () => abrirHonorario());
+$("view-honorarios").addEventListener("click", async (e) => {
+  const b = e.target.closest("button");
+  if (!b) return;
+  if (b.dataset.honVer) verHonorario(honorarios.find((h) => h.id === Number(b.dataset.honVer)));
+  if (b.dataset.honBorrar && confirm("¿Anular (eliminar) este recibo de honorarios? Si era una cuota, vuelve a quedar pendiente.")) {
+    await call("eliminar_honorario", { id: Number(b.dataset.honBorrar) });
+    toast("Recibo de honorarios anulado");
+    renderHonorarios();
+  }
+  const ref = b.dataset.hcCobrar || b.dataset.hcAvisar;
+  if (ref) {
+    const [pid, n] = ref.split(":").map(Number);
+    const plan = honorariosPlanes.find((p) => p.id === pid);
+    const cuota = plan?.cuotas.find((c) => c.n === n);
+    if (!plan || !cuota) return;
+    if (b.dataset.hcCobrar) cobrarCuotaHonorario(plan, cuota);
+    else {
+      const datos = { ...datosBaseMensaje(), nombre: primerNombre(plan.pagador_nombre), cuota: `${cuota.n} de ${plan.cuotas.length}`, concepto: plan.concepto.toLowerCase(), vencimiento: fmtDate(cuota.vence), monto: money(cuota.monto) };
+      if (await enviarWhatsapp({ telefono: plan.pagador_telefono, nombre: plan.pagador_nombre, contrato_id: plan.contrato_id ?? null, tipo: "honorarios", referencia: `cuota:${plan.id}:${cuota.n}`, mensaje: completarPlantilla(cfg("plantilla_honorarios_cuota"), datos) })) renderHonorarios();
+    }
+  }
+});
+
+/** Campos de forma de pago (reutiliza las opciones del cobro de alquileres). */
+function formaPagoHtml(prefijo) {
+  return `<div class="pago-opciones" id="${prefijo}-metodo-opc">
+      <button type="button" class="pago-op activo" data-metodo="Efectivo">💵 Efectivo</button>
+      <button type="button" class="pago-op" data-metodo="Transferencia">🏦 Transferencia</button>
+      <button type="button" class="pago-op" data-metodo="Cheque">🧾 Cheque</button>
+      <button type="button" class="pago-op" data-metodo="Otro">··· Otro</button>
+    </div><div class="form-grid tres pago-detalle" id="${prefijo}-metodo-detalle"></div>`;
+}
+function activarFormaPago(prefijo) {
+  const pintar = (m) => ($(`${prefijo}-metodo-detalle`).innerHTML = DETALLE_PAGO[m].map(([k, label, tipo, ph]) => `<div class="form-field"><label>${label}</label><input type="${tipo}" data-pago="${k}" placeholder="${esc(ph)}" /></div>`).join(""));
+  $(`${prefijo}-metodo-opc`).addEventListener("click", (e) => {
+    const b = e.target.closest("[data-metodo]");
+    if (!b) return;
+    document.querySelectorAll(`#${prefijo}-metodo-opc .pago-op`).forEach((x) => x.classList.toggle("activo", x === b));
+    pintar(b.dataset.metodo);
+  });
+  pintar("Efectivo");
+}
+function leerFormaPagoDe(prefijo) {
+  const m = document.querySelector(`#${prefijo}-metodo-opc .pago-op.activo`)?.dataset.metodo || "Efectivo";
+  const d = {};
+  document.querySelectorAll(`#${prefijo}-metodo-detalle [data-pago]`).forEach((i) => (d[i.dataset.pago] = i.value.trim()));
+  return textoFormaPago(m, d);
+}
+
+/** Registra el cobro de una cuota y abre el recibo. */
+async function registrarCobroCuota(plan, cuota, { fecha, monto, metodo, notas }) {
+  const n = (plan.cuotas || []).length;
+  const pagadoAntes = (plan.cuotas || []).filter((c) => c.recibo_id).reduce((a, c) => a + Number(c.monto || 0), 0);
+  const saldo = redondear2(Number(plan.total) - pagadoAntes - monto);
+  const h = await call("registrar_honorario", {
+    honorario: {
+      fecha, contrato_id: plan.contrato_id, pagador_tipo: plan.pagador_tipo, pagador_nombre: plan.pagador_nombre,
+      pagador_dni: plan.pagador_dni, pagador_telefono: plan.pagador_telefono, concepto: plan.concepto,
+      detalle: [plan.detalle, n > 1 ? `Cuota ${cuota.n} de ${n}` : ""].filter(Boolean).join(" — ") || null,
+      monto, metodo_pago: metodo,
+      notas: [notas, n > 1 ? (saldo > 0.009 ? `Saldo pendiente: ${money(saldo)}` : "Plan de honorarios cancelado.") : ""].filter(Boolean).join(" · ") || null,
+      usuario: usuarioNombre(), plan_id: plan.id, cuota: cuota.n,
+    },
+  });
+  toast(`Recibo de honorarios N° ${h.numero} guardado`);
+  await renderHonorarios();
+  setTimeout(() => verHonorario(h), 0);
+}
+
+function cobrarCuotaHonorario(plan, cuota) {
+  openModal({
+    title: `Cobrar cuota ${cuota.n} de ${plan.cuotas.length} — ${plan.pagador_nombre}`,
+    size: "wide",
+    saveLabel: "Registrar cobro y ver recibo",
+    html: `<div class="form-grid">
+      <div class="form-field full"><b>${esc(plan.concepto)}</b><span class="sub-line">Vence ${fmtDate(cuota.vence)}</span></div>
+      <div class="form-field"><label>Fecha de pago</label><input type="date" id="hcc-fecha" value="${hoyIso()}" /></div>
+      <div class="form-field"><label>Importe ($)</label><input type="number" step="any" id="hcc-monto" value="${esc(cuota.monto)}" /></div>
+      <div class="form-field full"><label>Forma de pago</label>${formaPagoHtml("hcc")}</div>
+      <div class="form-field full"><label>Observaciones</label><input type="text" id="hcc-notas" /></div></div>`,
+    onMount: () => activarFormaPago("hcc"),
+    onSave: async () => {
+      const monto = Number($("hcc-monto").value || 0);
+      if (!(monto > 0)) throw new Error("Escribí el importe");
+      await registrarCobroCuota(plan, cuota, { fecha: $("hcc-fecha").value || hoyIso(), monto, metodo: leerFormaPagoDe("hcc"), notas: $("hcc-notas").value.trim() });
+    },
+  });
+}
+
+function abrirHonorario(contratoId = null) {
+  const contratos = [...state.contratos].sort((a, b) => (a.estado === "activo" ? 0 : 1) - (b.estado === "activo" ? 0 : 1) || (b.numero || 0) - (a.numero || 0));
+  const opcC = `<option value="">— Sin contrato —</option>` + contratos.map((c) => `<option value="${c.id}" ${c.id === contratoId ? "selected" : ""}>N° ${esc(c.numero ?? c.id)} · ${esc(etiquetaInmueble(c))} — ${esc(c.inquilino_nombre)}${c.estado !== "activo" ? ` (${esc(c.estado)})` : ""}</option>`).join("");
+  let quien = "inquilino";
+  let enCuotas = false;
+  openModal({
+    title: "Nuevo honorario",
+    size: "xl",
+    saveLabel: "Guardar",
+    html: `<div class="form-grid" id="hon-form">
+      <div class="form-field full"><label>Contrato</label><select id="hon-contrato">${opcC}</select></div>
+      <div class="form-field full"><label>¿Quién paga?</label>
+        <div class="pago-opciones" id="hon-quien" style="grid-template-columns:repeat(3,1fr)">
+          <button type="button" class="pago-op activo" data-quien="inquilino">Inquilino</button>
+          <button type="button" class="pago-op" data-quien="propietario">Propietario</button>
+          <button type="button" class="pago-op" data-quien="otro">Otra persona</button>
+        </div></div>
+      <div class="form-field"><label>Nombre <span class="req">*</span></label><input type="text" id="hon-nombre" /></div>
+      <div class="form-field"><label>DNI / CUIT</label><input type="text" id="hon-dni" /></div>
+      <div class="form-field"><label>Teléfono (WhatsApp)</label><input type="text" id="hon-tel" /></div>
+      <div class="form-field"><label>Concepto</label><select id="hon-concepto">${CONCEPTOS_HONORARIOS.map(([k, l]) => `<option value="${k}">${esc(l)}</option>`).join("")}</select>
+        <input type="text" id="hon-concepto-otro" class="hidden" placeholder="Escribí el concepto" style="margin-top:6px" /></div>
+      <div class="form-field"><label>Importe total ($) <span class="req">*</span></label><input type="number" step="any" id="hon-total" placeholder="Escribí el importe" /></div>
+      <div class="form-field"><label>Ayuda: calcular con %</label><div class="carpeta-fila"><input type="number" step="any" id="hon-pct" value="${esc(cfg("honorarios_porcentaje") || "5")}" style="width:80px" /><span>% del contrato</span><button type="button" class="btn-secondary btn-sm" id="hon-calcular">Calcular</button></div></div>
+      <div class="form-field full"><label>Detalle (sale en el recibo)</label><input type="text" id="hon-detalle" placeholder="Opcional" /></div>
+      <div class="form-section">¿Cómo lo paga?</div>
+      <div class="form-field full"><div class="pago-opciones" id="hon-modo" style="grid-template-columns:repeat(2,1fr)">
+        <button type="button" class="pago-op activo" data-modo="unico">Pago único</button>
+        <button type="button" class="pago-op" data-modo="cuotas">En cuotas</button></div></div>
+      <div class="form-field"><label id="hon-vence-lbl">Vence</label><input type="date" id="hon-vence" value="${hoyIso()}" /></div>
+      <div class="form-field hidden" id="hon-n-wrap"><label>Cantidad de cuotas</label><input type="number" min="2" max="36" id="hon-n" value="3" /><small class="field-hint">Una por mes, desde la fecha de la primera</small></div>
+      <div class="form-field full hidden" id="hon-cuotas-wrap"></div>
+      <div class="form-section">Cobro</div>
+      <div class="form-field full"><label class="login-recordar"><input type="checkbox" id="hon-cobrar" checked /> <span id="hon-cobrar-txt">Registrar el cobro ahora y emitir el recibo</span></label></div>
+      <div class="form-field" id="hon-fpago-wrap"><label>Fecha de cobro</label><input type="date" id="hon-fecha" value="${hoyIso()}" /></div>
+      <div class="form-field full" id="hon-metodo-wrap"><label>Forma de pago</label>${formaPagoHtml("hon")}</div>
+      <div class="form-field full"><label>Observaciones</label><input type="text" id="hon-notas" /></div>
+    </div>`,
+    onMount: () => {
+      const contrato = () => byId(state.contratos, Number($("hon-contrato").value));
+      const completarPersona = () => {
+        const c = contrato();
+        if (!c || quien === "otro") return;
+        const p = quien === "inquilino" ? byId(state.inquilinos, c.inquilino_id) : byId(state.propietarios, c.propietario_id);
+        $("hon-nombre").value = p?.nombre || (quien === "inquilino" ? c.inquilino_nombre : c.propietario_nombre) || "";
+        $("hon-dni").value = p?.cuit_cuil || p?.dni_cuit || "";
+        $("hon-tel").value = p?.telefono || "";
+      };
+      const pintarCuotas = (desdeCero = true) => {
+        $("hon-n-wrap").classList.toggle("hidden", !enCuotas);
+        $("hon-cuotas-wrap").classList.toggle("hidden", !enCuotas);
+        $("hon-vence-lbl").textContent = enCuotas ? "Vence la 1ª cuota" : "Vence";
+        $("hon-cobrar-txt").textContent = enCuotas ? "Registrar ahora el cobro de la 1ª cuota y emitir el recibo" : "Registrar el cobro ahora y emitir el recibo";
+        if (!enCuotas) return;
+        const total = Number($("hon-total").value || 0);
+        const n = Math.min(36, Math.max(2, Number($("hon-n").value || 2)));
+        const base = Math.floor((total / n) * 100) / 100;
+        const vence = $("hon-vence").value || hoyIso();
+        const previos = desdeCero ? [] : [...document.querySelectorAll("#hon-cuotas-wrap tr[data-n]")].map((tr) => ({ vence: tr.querySelector("[data-c=vence]").value, monto: tr.querySelector("[data-c=monto]").value }));
+        $("hon-cuotas-wrap").innerHTML = `<table class="cb-tabla"><thead><tr><th>Cuota</th><th>Vence</th><th>Importe ($)</th></tr></thead><tbody>${Array.from({ length: n }, (_, i) => {
+          const m = i === n - 1 ? redondear2(total - base * (n - 1)) : base;
+          const p = previos[i];
+          return `<tr data-n="${i + 1}"><td><b>${i + 1}</b></td><td><input type="date" data-c="vence" value="${p?.vence || sumarMesesFecha(vence, i)}" /></td><td><input type="number" step="any" data-c="monto" value="${p?.monto || m}" /></td></tr>`;
+        }).join("")}</tbody></table><small class="field-hint">Podés cambiar las fechas y los importes de cada cuota.</small>`;
+      };
+      $("hon-quien").addEventListener("click", (e) => {
+        const b = e.target.closest("[data-quien]");
+        if (!b) return;
+        quien = b.dataset.quien;
+        document.querySelectorAll("#hon-quien .pago-op").forEach((x) => x.classList.toggle("activo", x === b));
+        if (quien === "otro") ["hon-nombre", "hon-dni", "hon-tel"].forEach((id) => ($(id).value = ""));
+        completarPersona();
+      });
+      $("hon-modo").addEventListener("click", (e) => {
+        const b = e.target.closest("[data-modo]");
+        if (!b) return;
+        enCuotas = b.dataset.modo === "cuotas";
+        document.querySelectorAll("#hon-modo .pago-op").forEach((x) => x.classList.toggle("activo", x === b));
+        pintarCuotas();
+      });
+      $("hon-calcular").addEventListener("click", () => {
+        const c = contrato();
+        if (!c) return toast("Elegí el contrato para calcular el porcentaje", true);
+        const meses = plazoMeses(c);
+        const total = Number(c.monto_inicial) * meses;
+        const pct = Number($("hon-pct").value || 0);
+        $("hon-total").value = redondear2((total * pct) / 100);
+        $("hon-detalle").value = `${String(pct).replace(".", ",")}% del valor total del contrato (${money(c.monto_inicial)} × ${meses} meses = ${money(total)})`;
+        pintarCuotas();
+      });
+      $("hon-total").addEventListener("input", () => pintarCuotas());
+      $("hon-n").addEventListener("input", () => pintarCuotas());
+      $("hon-vence").addEventListener("change", () => pintarCuotas());
+      $("hon-concepto").addEventListener("change", () => $("hon-concepto-otro").classList.toggle("hidden", $("hon-concepto").value !== "otro"));
+      $("hon-cobrar").addEventListener("change", (e) => {
+        $("hon-fpago-wrap").classList.toggle("hidden", !e.target.checked);
+        $("hon-metodo-wrap").classList.toggle("hidden", !e.target.checked);
+      });
+      $("hon-contrato").addEventListener("change", completarPersona);
+      activarFormaPago("hon");
+      completarPersona();
+    },
+    onSave: async () => {
+      const tipo = $("hon-concepto").value;
+      const concepto = tipo === "otro" ? $("hon-concepto-otro").value.trim() : CONCEPTOS_HONORARIOS.find(([k]) => k === tipo)[1];
+      if (!concepto) throw new Error("Escribí el concepto");
+      if (!$("hon-nombre").value.trim()) throw new Error("Falta el nombre de quien paga");
+      const total = Number($("hon-total").value || 0);
+      if (!(total > 0)) throw new Error("Escribí el importe total");
+      const cuotas = enCuotas
+        ? [...document.querySelectorAll("#hon-cuotas-wrap tr[data-n]")].map((tr) => ({ n: Number(tr.dataset.n), vence: tr.querySelector("[data-c=vence]").value, monto: Number(tr.querySelector("[data-c=monto]").value || 0) }))
+        : [{ n: 1, vence: $("hon-vence").value || hoyIso(), monto: total }];
+      const suma = redondear2(cuotas.reduce((a, c) => a + c.monto, 0));
+      if (Math.abs(suma - total) > 0.01 && !confirm(`Las cuotas suman ${money(suma)} y el total es ${money(total)}. ¿Guardar igual?`)) return false;
+      const plan = await call("crear_honorario_plan", {
+        plan: {
+          contrato_id: $("hon-contrato").value ? Number($("hon-contrato").value) : null, pagador_tipo: quien,
+          pagador_nombre: $("hon-nombre").value.trim(), pagador_dni: $("hon-dni").value.trim() || null, pagador_telefono: $("hon-tel").value.trim() || null,
+          concepto, detalle: $("hon-detalle").value.trim() || null, total, cuotas, notas: $("hon-notas").value.trim() || null, usuario: usuarioNombre(),
+        },
+      });
+      if ($("hon-cobrar").checked) {
+        await registrarCobroCuota(plan, cuotas[0], { fecha: $("hon-fecha").value || hoyIso(), monto: cuotas[0].monto, metodo: leerFormaPagoDe("hon"), notas: $("hon-notas").value.trim() });
+      } else {
+        toast(enCuotas ? `Plan de ${cuotas.length} cuotas guardado: te aviso cuando venza cada una` : "Honorario guardado: te aviso cuando venza");
+        await renderHonorarios();
+      }
+    },
+  });
+}
+
+function verHonorario(h) {
+  if (!h) return;
+  const c = h.contrato_id ? byId(state.contratos, h.contrato_id) : null;
+  const ctx = c ? { ...c, inmueble_localidad: byId(state.inmuebles, c.inmueble_id)?.localidad } : null;
+  const htmlDoc = htmlReciboHonorario(h, ctx, configCompleta());
+  const nombre = `Honorarios_N${String(h.numero).padStart(6, "0")}_${(h.pagador_nombre || "").split(" ").slice(0, 2).join("_")}`;
+  const sub = `Honorarios/${String(h.fecha).slice(0, 7)}`;
+  openPrint(htmlDoc, {
+    titulo: `Recibo de honorarios N° ${h.numero}`,
+    apaisado: true,
+    pdf: { nombre, subcarpeta: sub },
+    whatsapp: async () => {
+      const datos = { ...datosBaseMensaje(), nombre: primerNombre(h.pagador_nombre), recibo: h.numero, concepto: h.concepto.toLowerCase(), monto: money(h.monto) };
+      await enviarWhatsappConPdf({
+        htmlDoc, apaisado: true, nombrePdf: nombre, subcarpeta: sub,
+        telefono: h.pagador_telefono, nombre: h.pagador_nombre, contrato_id: h.contrato_id,
+        tipo: "honorarios", referencia: String(h.numero),
+        mensaje: completarPlantilla(cfg("plantilla_honorarios"), datos),
+      });
+    },
+  });
+}

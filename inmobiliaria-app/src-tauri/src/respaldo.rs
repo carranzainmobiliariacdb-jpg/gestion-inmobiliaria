@@ -23,6 +23,8 @@ const TABLAS: &[(&str, &str, &str, &str)] = &[
     ("actualizaciones", "Aumentos", "*", "id"),
     ("pagos", "Cobros", "*", "id"),
     ("liquidaciones", "Liquidaciones", "*", "id"),
+    ("honorarios", "Honorarios", "*", "id"),
+    ("honorarios_planes", "Honorarios - planes", "*", "id"),
     ("servicios_estado", "Servicios", "*", "id"),
     ("recordatorios", "Mensajes enviados", "*", "id"),
     ("inmueble_fotos", "Fotos (lista)", "id,inmueble_id,contrato_id,tipo,descripcion,fecha,usuario", "id"),
@@ -184,7 +186,7 @@ pub async fn hacer_respaldo(
                 por_tabla.push((hoja_nombre, filas));
             }
             // Las tablas del portal no existen hasta que se activa: no es un error.
-            Err(_) if tabla.starts_with("portal_") => {}
+            Err(_) if tabla.starts_with("portal_") || tabla.starts_with("honorarios") => {}
             Err(e) => errores.push(format!("{}: {}", hoja_nombre, e)),
         }
     }
