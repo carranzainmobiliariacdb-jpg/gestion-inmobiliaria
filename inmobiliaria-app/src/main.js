@@ -3983,6 +3983,106 @@ document.addEventListener("keydown", (e) => {
   else if (!modalOverlay.classList.contains("hidden")) closeModal();
 });
 
+// ---------- trabajo sin conexión ----------
+//
+// El programa guarda una copia de los datos en la PC. Sin internet sigue
+// funcionando con esa copia y anota los cambios; cuando vuelve internet los
+// sube solo. Acá se muestra el estado arriba, en la barra de título.
+
+const conexion = { ultimo: null, pendAntes: 0, sinAntes: false };
+
+/** "15/11/2026 19:37" → "19:37" si es de hoy, si no "15/11 19:37". */
+function horaCorta(txt) {
+  if (!txt) return "";
+  const [f, h = ""] = txt.split(" ");
+  const hoy = hoyIso();
+  return f === `${hoy.slice(8, 10)}/${hoy.slice(5, 7)}/${hoy.slice(0, 4)}` ? h : `${f.slice(0, 5)} ${h}`;
+}
+
+function pintarConexion(e) {
+  const pill = $("conexion-pill");
+  if (!pill || !e) return;
+  pill.classList.remove("hidden", "cx-off", "cx-pend", "cx-ok", "cx-alerta");
+  const n = e.pendientes || 0;
+  const avisos = (e.avisos || []).length;
+  if (e.sin_conexion) {
+    pill.classList.add("cx-off");
+    pill.textContent = n ? `● Sin conexión · ${n} cambio${n === 1 ? "" : "s"} sin subir` : "● Sin conexión · trabajando con la copia de esta PC";
+  } else if (n) {
+    pill.classList.add("cx-pend");
+    pill.textContent = `⟳ Subiendo ${n} cambio${n === 1 ? "" : "s"}…`;
+  } else if (avisos) {
+    pill.classList.add("cx-alerta");
+    pill.textContent = `⚠ Revisar sincronización (${avisos})`;
+  } else {
+    pill.classList.add("cx-ok");
+    pill.textContent = e.ultima_sync ? `● Datos al día · ${horaCorta(e.ultima_sync)}` : "● En línea";
+  }
+}
+
+async function revisarConexion() {
+  let e;
+  try {
+    e = await invoke("estado_conexion");
+  } catch {
+    return;
+  }
+  if (!e) return;
+  const antes = conexion.ultimo;
+  conexion.ultimo = e;
+  pintarConexion(e);
+  if (antes) {
+    if (!antes.sin_conexion && e.sin_conexion) toast("Se cortó internet: seguís trabajando con la copia de esta PC. Los cambios se suben solos cuando vuelva.");
+    const subio = antes.pendientes > 0 && e.pendientes === 0 && !e.sin_conexion;
+    if (subio) toast("Volvió internet: se subieron los cambios hechos sin conexión ✓");
+    if (antes.sin_conexion && !e.sin_conexion && !antes.pendientes) toast("Volvió la conexión a internet ✓");
+    // Recargar para ver los números/ids definitivos y lo hecho en la otra PC.
+    if ((subio || (antes.sin_conexion && !e.sin_conexion)) && !$("app").classList.contains("hidden") && modalOverlay.classList.contains("hidden")) {
+      loadAll().catch(() => {});
+    }
+    if ((e.avisos || []).length > (antes.avisos || []).length) mostrarConexion();
+  }
+}
+
+function mostrarConexion() {
+  const e = conexion.ultimo || {};
+  const n = e.pendientes || 0;
+  const lista = (e.detalle_pendientes || []).map((d) => `<li>${esc(d)}</li>`).join("");
+  const avisos = (e.avisos || []).map((a) => `<li>${esc(a)}</li>`).join("");
+  openModal({
+    title: e.sin_conexion ? "Sin conexión a internet" : "Conexión y copia de datos",
+    saveLabel: avisos ? "Entendido" : "Sincronizar ahora",
+    html: `
+      <p>${e.sin_conexion
+        ? "No hay internet en este momento. <b>Podés seguir usando el programa normalmente</b>: se trabaja con la copia de los datos guardada en esta PC."
+        : "Hay conexión. El programa guarda además una copia de todos los datos en esta PC, para poder seguir trabajando si se corta internet."}</p>
+      <p class="hint">Última vez que se sincronizó: <b>${esc(e.ultima_sync || "nunca")}</b>${e.copia_local ? "" : " — todavía no hay copia en esta PC"}.</p>
+      ${n ? `<h4>Cambios guardados en esta PC, sin subir todavía (${n})</h4><ul class="cx-lista">${lista}</ul><p class="hint">Se suben solos apenas vuelva internet.</p>` : `<p>✓ No hay cambios pendientes de subir.</p>`}
+      ${avisos ? `<h4>Para revisar</h4><ul class="cx-lista cx-avisos">${avisos}</ul>` : ""}
+      <p class="hint">Sin internet no se pueden consultar el dólar, el ICL/IPC, los servicios ni el portal de inquilinos, y la otra PC no ve tus cambios hasta que se suban.</p>`,
+    onSave: async () => {
+      if (avisos) {
+        await invoke("limpiar_avisos_sincronizacion").catch(() => {});
+        await revisarConexion();
+        return true;
+      }
+      try {
+        const r = await invoke("sincronizar_ahora");
+        conexion.ultimo = r;
+        pintarConexion(r);
+        toast(r?.pendientes ? "Quedaron cambios sin subir; se reintenta solo." : "Datos sincronizados ✓");
+        loadAll().catch(() => {});
+      } catch (err) {
+        toast(typeof err === "string" ? err : "No se pudo sincronizar", true);
+        return false;
+      }
+    },
+  });
+}
+
+$("conexion-pill")?.addEventListener("click", mostrarConexion);
+setInterval(revisarConexion, 5000);
+
 // ---------- arranque ----------
 
 async function arrancar() {

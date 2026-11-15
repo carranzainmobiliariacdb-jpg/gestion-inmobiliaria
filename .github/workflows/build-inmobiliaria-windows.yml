@@ -78,3 +78,17 @@ jobs:
           releaseBody: "Instalador para Windows. La app se actualiza sola a partir de esta versión."
           releaseDraft: false
           prerelease: false
+
+      # Versión portable: un solo .exe que se abre sin instalar (útil para
+      # llevar en un pendrive). Usa el WebView2 que ya trae Windows 10/11.
+      # La que se actualiza sola es la instalada.
+      - name: Publicar también la versión portable (.exe sin instalador)
+        shell: bash
+        env:
+          GH_TOKEN: ${{ secrets.GITHUB_TOKEN }}
+        run: |
+          VERSION=$(node -p "require('./inmobiliaria-app/src-tauri/tauri.conf.json').version")
+          EXE=$(ls inmobiliaria-app/src-tauri/target/release/*.exe | grep -vi "build-script" | head -1)
+          echo "Binario: $EXE"
+          cp "$EXE" "GestionInmobiliaria-portable.exe"
+          gh release upload "v$VERSION" "GestionInmobiliaria-portable.exe" --clobber

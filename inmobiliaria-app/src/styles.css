@@ -595,3 +595,12 @@ tr.agua-hecha { background: #f6fbf7; }
 .rm-serv-tit { width: 100%; font-size: 7px; text-transform: uppercase; letter-spacing: 1px; color: #8a6d2b; font-weight: 600; }
 .rm-serv b { font-weight: 700; color: #15181e; }
 .rm-serv-i { font-size: 8px; margin-right: 2px; }
+
+/* Estado de conexión / copia local (barra de título) */
+.conexion-pill { border: 0; border-radius: 999px; padding: 3px 12px; margin-right: 10px; font-size: 11.5px; font-weight: 600; cursor: pointer; white-space: nowrap; background: rgba(255,255,255,0.08); color: rgba(255,255,255,0.7); }
+.conexion-pill.cx-ok { color: #8fd6a8; background: rgba(46, 160, 90, 0.14); }
+.conexion-pill.cx-off { color: #1a1300; background: #f0b429; }
+.conexion-pill.cx-pend { color: #fff; background: #2f6fb3; }
+.conexion-pill.cx-alerta { color: #fff; background: var(--danger); }
+.cx-lista { margin: 6px 0 10px; padding-left: 20px; max-height: 220px; overflow: auto; font-size: 13px; }
+.cx-avisos li { margin-bottom: 6px; }

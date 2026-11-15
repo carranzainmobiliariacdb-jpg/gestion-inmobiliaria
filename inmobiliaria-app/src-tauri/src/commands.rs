@@ -211,17 +211,26 @@ const SUPABASE_URL_DE_FABRICA: Option<&str> = option_env!("INMOBILIARIA_SUPABASE
 const SUPABASE_ANON_KEY_DE_FABRICA: Option<&str> = option_env!("INMOBILIARIA_SUPABASE_ANON_KEY");
 
 async fn conectar_y_guardar<R: tauri::Runtime>(app: &tauri::AppHandle<R>, state: &State<'_, DbState>, config: SupabaseConfig) -> Result<(), String> {
-    let cliente = Cliente::nuevo(&config);
-    cliente.probar().await.map_err(|e| {
-        format!(
-            "No se pudo conectar con Supabase. Verificá la URL, la clave y tu conexión a internet. Detalle: {}",
-            e
-        )
-    })?;
     let data_dir = app.path().app_data_dir().map_err(map_err)?;
     std::fs::create_dir_all(&data_dir).map_err(map_err)?;
+    // Con la copia local de los datos (carpeta "espejo"), el programa sigue
+    // andando sin internet y sube los cambios cuando vuelve.
+    let cliente = Cliente::nuevo(&config).con_espejo(&data_dir);
+    if let Err(e) = cliente.probar().await {
+        let espejo = cliente.espejo().cloned();
+        match espejo {
+            Some(esp) if e.red && esp.tiene_datos() => esp.marcar_sin_conexion(true),
+            _ => {
+                return Err(format!(
+                    "No se pudo conectar con Supabase. Verificá la URL, la clave y tu conexión a internet. Detalle: {}",
+                    e
+                ))
+            }
+        }
+    }
     crate::config::guardar(&data_dir, &config)?;
     *state.0.write().await = Some(cliente);
+    crate::sincro::iniciar(app);
     Ok(())
 }
 
@@ -292,7 +301,9 @@ pub async fn estado_seguridad<R: tauri::Runtime>(app: tauri::AppHandle<R>, state
     let cliente = obtener_cliente(&state).await?;
     let tiene_clave = matches!(cliente.rol().as_deref(), Some("service_role") | Some("secret"));
     let acceso = cliente.select::<Value>("usuarios", "select=id&limit=1").await.is_ok();
-    let activa = cliente.rpc("seguridad_activa", &json!({})).await.ok().and_then(|v| v.as_bool()).unwrap_or(false);
+    let sin_conexion = cliente.espejo().map(|e| e.sin_conexion()).unwrap_or(false);
+    // Sin internet no se puede preguntar a la base: se asume como estaba.
+    let activa = sin_conexion || cliente.rpc("seguridad_activa", &json!({})).await.ok().and_then(|v| v.as_bool()).unwrap_or(false);
     let portal = cliente.select::<Value>("portal_accesos", "select=token&limit=1").await.is_ok();
     Ok(json!({
         "clave_oficina": tiene_clave,

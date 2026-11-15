@@ -12,6 +12,8 @@ mod respaldo;
 mod portal;
 mod honorarios;
 mod supabase;
+mod espejo;
+mod sincro;
 
 pub use commands::DbState;
 use tauri::Manager;
@@ -137,6 +139,9 @@ pub fn manejador<R: tauri::Runtime>() -> impl Fn(tauri::ipc::Invoke<R>) -> bool 
         portal::portal_crear_acceso,
         portal::portal_crear_aviso,
         portal::portal_imagen,
+        sincro::estado_conexion,
+        sincro::sincronizar_ahora,
+        sincro::limpiar_avisos_sincronizacion,
         commands::guardar_clave_oficina,
         commands::estado_seguridad,
     ]
@@ -145,5 +150,16 @@ pub fn manejador<R: tauri::Runtime>() -> impl Fn(tauri::ipc::Invoke<R>) -> bool 
 /// Estado ya conectado a una API PostgREST dada (solo para el puente de pruebas).
 #[doc(hidden)]
 pub fn estado_para_pruebas(base_rest: String, anon_key: String) -> DbState {
-    DbState(RwLock::new(Some(supabase::Cliente::con_base_completa(base_rest, anon_key))))
+    let mut cliente = supabase::Cliente::con_base_completa(base_rest, anon_key);
+    // Con ESPEJO_DIR se prueba también el trabajo sin conexión.
+    if let Ok(dir) = std::env::var("ESPEJO_DIR") {
+        cliente = cliente.con_espejo(std::path::Path::new(&dir));
+    }
+    DbState(RwLock::new(Some(cliente)))
+}
+
+/// Arranca la sincronización de fondo (solo para el puente de pruebas).
+#[doc(hidden)]
+pub fn iniciar_sincro_para_pruebas<R: tauri::Runtime>(app: &tauri::AppHandle<R>) {
+    sincro::iniciar(app);
 }

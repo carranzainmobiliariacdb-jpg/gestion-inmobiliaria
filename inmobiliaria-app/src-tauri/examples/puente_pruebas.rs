@@ -24,6 +24,9 @@ fn main() {
         .build(mock_context(noop_assets()))
         .expect("app de prueba");
     let webview = WebviewWindowBuilder::new(&app, "main", Default::default()).build().unwrap();
+    if std::env::var("ESPEJO_DIR").is_ok() {
+        inmobiliaria_app_lib::iniciar_sincro_para_pruebas(app.handle());
+    }
 
     let listener = TcpListener::bind(format!("127.0.0.1:{}", puerto)).unwrap();
     eprintln!("puente escuchando en http://127.0.0.1:{}", puerto);
