@@ -3588,6 +3588,10 @@ async function renderConfig() {
         ${campoCfg("inmobiliaria_nombre", "Nombre", { full: true })}
         ${campoCfg("inmobiliaria_matricula", "Matrícula")}
         ${campoCfg("inmobiliaria_cuit", "CUIT")}
+        <div class="form-field"><label>Números de servicios en el recibo</label><select data-cfg="recibo_servicios">
+          <option value="1" ${(cfgBorrador.recibo_servicios ?? cfg("recibo_servicios")) !== "0" ? "selected" : ""}>Mostrar (luz, gas y agua)</option>
+          <option value="0" ${(cfgBorrador.recibo_servicios ?? cfg("recibo_servicios")) === "0" ? "selected" : ""}>No mostrar</option></select>
+          <small class="field-hint">Se toman de la ficha de cada inmueble.</small></div>
         ${campoCfg("honorarios_porcentaje", "Honorarios: porcentaje sugerido (%)", { type: "number", hint: "Sólo como ayuda para calcular: el importe siempre se puede escribir a mano." })}
         ${campoCfg("honorarios_numero_desde", "Numeración de recibos de honorarios desde", { type: "number", hint: "Opcional: para seguir la numeración que ya usabas." })}
         ${campoCfg("inmobiliaria_direccion", "Dirección")}

@@ -62,6 +62,21 @@ export function periodosDeRecibo(r) {
   return `${pers.slice(0, -1).map(periodoTexto).join(", ")} y ${periodoTexto(pers[pers.length - 1])}`;
 }
 
+/** Banda con los números de servicios (luz, gas, agua) del inmueble (para que el
+ *  inquilino los tenga a mano). Sólo muestra los que están cargados. */
+function serviciosInmueble(inm) {
+  const luz = [inm.servicio_luz && `cliente ${esc(inm.servicio_luz)}`, inm.servicio_luz_contrato && `contrato ${esc(inm.servicio_luz_contrato)}`].filter(Boolean).join(" · ");
+  const items = [
+    luz && ["⚡", "Luz EPEC", luz],
+    inm.servicio_gas && ["🔥", "Gas", `cuenta ${esc(inm.servicio_gas)}`],
+    inm.servicio_agua && ["💧", "Agua", `cuenta ${esc(inm.servicio_agua)}`],
+  ].filter(Boolean);
+  if (!items.length) return "";
+  return `<div class="rm-servicios"><span class="rm-serv-tit">Servicios del inmueble</span>${items
+    .map(([i, n, v]) => `<span class="rm-serv"><span class="rm-serv-i">${i}</span><b>${n}</b> ${v}</span>`)
+    .join("")}</div>`;
+}
+
 function mitadRecibo(r, cfg, copia) {
   const c = r.contratos || {};
   const inq = c.inquilinos || {};
@@ -120,6 +135,7 @@ function mitadRecibo(r, cfg, copia) {
       <div class="rm-dato rm-full"><label>Propiedad</label><b>${inm.codigo != null ? `<span class="rm-cod">${esc(inm.codigo)}</span> ` : ""}${esc(direccion)}</b>${inm.localidad ? `<small>${esc(inm.localidad)}</small>` : ""}</div>
       <div class="rm-dato rm-full"><label>Por cuenta y orden de</label><b>${esc(prop.nombre || "")}</b></div>
     </div>
+    ${cfg.recibo_servicios === "0" ? "" : serviciosInmueble(inm)}
     <table class="rm-tabla${cantFilas > 6 ? " rm-compacta" : ""}">
       <thead><tr><th>Concepto</th><th>Período</th><th class="num">Importe</th><th class="num">Interés</th><th class="num">Multa</th><th class="num">Total</th></tr></thead>
       <tbody>${filas}</tbody>

@@ -589,3 +589,9 @@ tr.agua-hecha { background: #f6fbf7; }
 .portal-pasos li.hecho > b { color: var(--success, #1d7a46); }
 #portal-tabs { margin-bottom: 14px; }
 .seccion-titulo { margin: 4px 0 10px; font-size: 14px; text-transform: uppercase; letter-spacing: 0.6px; color: var(--text-muted); }
+
+/* Números de servicios en el recibo */
+.rm-servicios { margin: 0 12px 6px; padding: 5px 8px; border: 1px solid #e3d3ad; border-radius: 4px; background: #fbf7ee; display: flex; flex-wrap: wrap; gap: 3px 12px; align-items: baseline; font-size: 8.5px; color: #33363c; }
+.rm-serv-tit { width: 100%; font-size: 7px; text-transform: uppercase; letter-spacing: 1px; color: #8a6d2b; font-weight: 600; }
+.rm-serv b { font-weight: 700; color: #15181e; }
+.rm-serv-i { font-size: 8px; margin-right: 2px; }

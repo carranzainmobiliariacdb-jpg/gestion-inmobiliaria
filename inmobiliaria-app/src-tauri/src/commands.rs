@@ -868,7 +868,7 @@ pub async fn get_recibo(state: State<'_, DbState>, pago_id: i64) -> Result<Value
         .select_uno(
             "pagos",
             &format!(
-                "id=eq.{}&select=*,contratos(id,numero,fecha_inicio,fecha_fin,dia_pago,inquilinos(nombre,dni_cuit,telefono,email),inmuebles(codigo,direccion,piso_depto,localidad,propietarios(nombre,dni_cuit,telefono)))",
+                "id=eq.{}&select=*,contratos(id,numero,fecha_inicio,fecha_fin,dia_pago,inquilinos(nombre,dni_cuit,telefono,email),inmuebles(codigo,direccion,piso_depto,localidad,servicio_luz,servicio_luz_contrato,servicio_agua,servicio_gas,propietarios(nombre,dni_cuit,telefono)))",
                 pago_id
             ),
         )
