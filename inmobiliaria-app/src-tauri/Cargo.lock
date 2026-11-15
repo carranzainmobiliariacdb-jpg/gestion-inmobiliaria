@@ -1884,7 +1884,7 @@ dependencies = [
 
 [[package]]
 name = "inmobiliaria-app"
-version = "0.19.1"
+version = "0.20.1"
 dependencies = [
  "base64 0.22.1",
  "bcrypt",
@@ -2293,7 +2293,7 @@ dependencies = [
 
 [[package]]
 name = "muda"
-version = "0.20.1"
+version = "0.20.0"
 source = "registry+https://github.com/rust-lang/crates.io-index"
 checksum = "cca139e57da4383727f189e43e66e84fa372347027fc996f9f1a007ec0a37996"
 dependencies = [
