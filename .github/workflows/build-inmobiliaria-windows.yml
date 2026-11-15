@@ -87,8 +87,9 @@ jobs:
         env:
           GH_TOKEN: ${{ secrets.GITHUB_TOKEN }}
         run: |
-          VERSION=$(node -p "require('./inmobiliaria-app/src-tauri/tauri.conf.json').version")
-          EXE=$(ls inmobiliaria-app/src-tauri/target/release/*.exe | grep -vi "build-script" | head -1)
+          # (corre dentro de inmobiliaria-app/, el directorio por defecto del job)
+          VERSION=$(node -p "require('./src-tauri/tauri.conf.json').version")
+          EXE=$(ls src-tauri/target/release/*.exe | grep -vi "build-script" | head -1)
           echo "Binario: $EXE"
           cp "$EXE" "GestionInmobiliaria-portable.exe"
           gh release upload "v$VERSION" "GestionInmobiliaria-portable.exe" --clobber
