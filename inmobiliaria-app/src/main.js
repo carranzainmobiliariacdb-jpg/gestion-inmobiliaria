@@ -56,6 +56,8 @@ const CONFIG_DEFECTO = {
   portal_url: "https://carranzainmobiliariacdb-jpg.github.io/gestion-inmobiliaria/",
   plantilla_portal:
     "Hola {nombre}! Desde {inmobiliaria} te compartimos tu acceso personal al Portal del inquilino: ahí ves tu estado de cuenta, descargás tus recibos, informás pagos y hacés reclamos desde el celular.\n{link}\nEs personal: no lo compartas.",
+  plantilla_portal_propietario:
+    "Hola {nombre}! Desde {inmobiliaria} te compartimos tu acceso personal al Portal del propietario: ahí ves tus propiedades, los cobros y liquidaciones, los reclamos y fotos que envían los inquilinos, y podés dejarnos tu comentario.\n{link}\nEs personal: no lo compartas.",
   wa_datos_pago: "",
   aviso_dias_antes: "5",
   plantilla_recordatorio:
@@ -3572,6 +3574,7 @@ const VARIABLES = {
   plantilla_cumple: ["nombre", "inmobiliaria"],
   plantilla_servicio: ["nombre", "inmueble", "servicio", "periodos", "vencimiento", "monto", "inmobiliaria"],
   plantilla_portal: ["nombre", "link", "inmobiliaria"],
+  plantilla_portal_propietario: ["nombre", "link", "inmobiliaria"],
   plantilla_honorarios: ["nombre", "recibo", "concepto", "monto", "inmobiliaria"],
   plantilla_honorarios_cuota: ["nombre", "cuota", "concepto", "vencimiento", "monto", "datos_pago", "inmobiliaria"],
 };
@@ -3644,6 +3647,7 @@ async function renderConfig() {
       ["plantilla_cumple", "Cumpleaños"],
       ["plantilla_servicio", "Servicio impago (luz, gas, agua)"],
       ["plantilla_portal", "Link del Portal del inquilino"],
+      ["plantilla_portal_propietario", "Link del Portal del propietario"],
       ["plantilla_honorarios", "Recibo de honorarios"],
       ["plantilla_honorarios_cuota", "Recordatorio de cuota de honorarios"],
     ];
@@ -4423,7 +4427,7 @@ function respaldoAutomatico() {
 
 // ---------- PORTAL DE INQUILINOS (lado oficina) ----------
 
-const portal = { estado: null, accesos: [], pagos: [], reclamos: [], avisos: [], tab: "pagos" };
+const portal = { estado: null, accesos: [], accesosProp: [], pagos: [], reclamos: [], avisos: [], tab: "pagos" };
 const ESTADOS_RECLAMO = [["nuevo", "Nuevo"], ["recibido", "Recibido"], ["en_arreglo", "En arreglo"], ["resuelto", "Resuelto"]];
 
 /** Código secreto de 32 letras/números para el link de cada inquilino. */
@@ -4434,6 +4438,7 @@ function nuevoCodigoPortal() {
   return Array.from(b, (x) => abc[x % abc.length]).join("");
 }
 const linkPortal = (token) => `${(cfg("portal_url") || "").replace(/\/?$/, "/")}#t=${token}`;
+const linkPortalPropietario = (token) => `${(cfg("portal_url") || "").replace(/\/?$/, "/")}#p=${token}`;
 
 /** "Octubre 2026, Noviembre 2026" → ["2026-10", "2026-11"] */
 function periodosDesdeTexto(txt) {
@@ -4453,7 +4458,8 @@ async function cargarPortal() {
   portal.estado = await invoke("estado_seguridad").catch(() => null);
   if (!portal.estado?.seguridad_activa || !portal.estado?.portal_tablas) return;
   const [accesos, pagos, reclamos, avisos] = await Promise.all(["accesos", "pagos", "reclamos", "avisos"].map((q) => invoke("portal_listar", { que: q }).catch(() => [])));
-  Object.assign(portal, { accesos, pagos, reclamos, avisos });
+  const accesosProp = portal.estado.portal_propietarios ? await invoke("portal_listar", { que: "accesos_prop" }).catch(() => []) : [];
+  Object.assign(portal, { accesos, accesosProp, pagos, reclamos, avisos });
   badgePortal();
 }
 function badgePortal() {
@@ -4467,6 +4473,7 @@ $("portal-refrescar").addEventListener("click", async () => {
 });
 
 const inquilinoNombre = (id) => byId(state.inquilinos, id)?.nombre || "(inquilino)";
+const propietarioNombre = (id) => byId(state.propietarios, id)?.nombre || "(propietario)";
 const contratoTxt = (id) => {
   const c = byId(state.contratos, id);
   return c ? `${codHtml(c.inmueble_codigo)}${esc(c.inmueble_direccion)}` : "";
@@ -4487,6 +4494,7 @@ async function renderPortal(recargar = true) {
     ["reclamos", `Reclamos${nuevosR ? ` (${nuevosR})` : ""}`],
     ["avisos", "Avisos"],
     ["links", "Links de inquilinos"],
+    ["propietarios", "Portal de propietarios"],
   ];
   body.innerHTML = `<div class="tabs" id="portal-tabs">${tabs.map(([k, l]) => `<button class="tab ${portal.tab === k ? "active" : ""}" data-ptab="${k}">${l}</button>`).join("")}</div>
     <div id="portal-tab-body"></div>`;
@@ -4495,6 +4503,35 @@ async function renderPortal(recargar = true) {
   if (portal.tab === "reclamos") tb.innerHTML = portalReclamosHtml();
   if (portal.tab === "avisos") tb.innerHTML = portalAvisosHtml();
   if (portal.tab === "links") tb.innerHTML = portalLinksHtml();
+  if (portal.tab === "propietarios") tb.innerHTML = portalPropietariosHtml();
+}
+
+function portalPropietariosHtml() {
+  if (!portal.estado?.portal_propietarios)
+    return `<div class="panel portal-activar"><h3>Activar el Portal de propietarios (una sola vez)</h3>
+      <p class="hint">Cada propietario entra con su link personal y ve sus propiedades, quién alquila, los cobros de cada mes, las liquidaciones (para descargar), los reclamos de los inquilinos con sus fotos y las fotos de la propiedad. Puede dejar un comentario en cada reclamo (por ejemplo «autorizo el arreglo») y vos lo ves acá en <b>Reclamos</b>. No ve el teléfono ni los datos personales del inquilino.</p>
+      <ol class="portal-pasos"><li><b>Actualizar la base de datos</b>
+        <p class="hint">Tocá <b>Copiar código</b>, entrá a <b>supabase.com</b> → tu proyecto → <b>SQL Editor</b> → <b>New query</b>, pegá con Ctrl+V y tocá <b>Run</b>. Tiene que decir <b>Success</b>. (Es el mismo código del portal, actualizado: se puede correr de nuevo sin problema.)</p>
+        <button class="btn-secondary btn-sm" id="pp-copiar-sql">Copiar código</button> <button class="btn-primary btn-sm" id="pp-verificar">Ya lo corrí: verificar</button></li></ol></div>`;
+  const conInmuebles = new Map();
+  for (const i of state.inmuebles) if (i.propietario_id && !conInmuebles.has(i.propietario_id)) conInmuebles.set(i.propietario_id, []);
+  for (const i of state.inmuebles) if (i.propietario_id) conInmuebles.get(i.propietario_id).push(i);
+  const filas = [...conInmuebles.entries()]
+    .map(([id, inms]) => [byId(state.propietarios, id), inms])
+    .filter(([p]) => p)
+    .sort((a, b) => String(a[0].nombre).localeCompare(String(b[0].nombre)))
+    .map(([p, inms]) => {
+      const acc = portal.accesosProp.find((a) => a.propietario_id === p.id && a.activo);
+      const estado = acc
+        ? `<span class="pill pill-ok">Con link</span><span class="sub-line">${acc.ultimo_acceso ? `Entró ${new Date(acc.ultimo_acceso).toLocaleString("es-AR", { day: "2-digit", month: "2-digit", hour: "2-digit", minute: "2-digit" })}` : "Todavía no entró"}</span>`
+        : '<span class="pill pill-gris">Sin link</span>';
+      return `<tr><td><b>${esc(p.nombre)}</b><span class="sub-line">${esc(p.telefono || "sin teléfono")}</span></td>
+        <td>${inms.map((i) => `${codHtml(i.codigo)}${esc(i.direccion)}${i.piso_depto ? " " + esc(i.piso_depto) : ""}`).join("<br/>")}</td><td>${estado}</td>
+        <td class="actions"><button class="btn-whatsapp btn-sm" data-lp-enviar="${p.id}">${ICONO_WA} ${acc ? "Reenviar link" : "Enviar link"}</button>
+        ${acc ? `<button class="btn-link" data-lp-copiar="${p.id}">Copiar link</button><button class="btn-link peligro" data-lp-renovar="${p.id}" title="El link anterior deja de funcionar">Cambiar link</button>` : `<button class="btn-link" data-lp-copiar="${p.id}">Copiar link</button>`}</td></tr>`;
+    });
+  return `<p class="hint">Cada propietario entra con su <b>link personal</b> y ve: sus propiedades y quién las alquila, el alquiler actual y los próximos aumentos, qué meses ya se cobraron, sus liquidaciones (para descargar), los <b>reclamos y fotos</b> que mandan los inquilinos (puede dejar un comentario, que ves en <b>Reclamos</b>) y las fotos de la propiedad. No ve el teléfono ni los datos personales del inquilino. Para mandarles novedades usá <b>Avisos</b> → «Para: propietarios».</p>
+    <div class="table-wrap"><table class="data-table"><thead><tr><th>Propietario</th><th>Inmuebles</th><th>Portal</th><th></th></tr></thead><tbody>${filas.join("") || vacio(4, "No hay propietarios con inmuebles")}</tbody></table></div>`;
 }
 
 function portalPagosHtml() {
@@ -4517,28 +4554,38 @@ function portalReclamosHtml() {
       <td><b>${esc(inquilinoNombre(r.inquilino_id))}</b><span class="sub-line">${contratoTxt(r.contrato_id)}</span></td>
       <td><b>${esc(r.titulo)}</b><span class="sub-line" style="white-space:normal">${esc(r.descripcion || "")}</span></td>
       <td><select data-rec-estado="${r.id}">${ESTADOS_RECLAMO.map(([v, l]) => `<option value="${v}" ${r.estado === v ? "selected" : ""}>${l}</option>`).join("")}</select></td>
-      <td><input type="text" data-rec-resp="${r.id}" value="${esc(r.respuesta || "")}" placeholder="Respuesta que ve el inquilino" style="min-width:220px" /></td>
+      <td><input type="text" data-rec-resp="${r.id}" value="${esc(r.respuesta || "")}" placeholder="Respuesta que ven el inquilino y el propietario" style="min-width:220px" />${r.comentario_propietario ? `<span class="sub-line comentario-prop" style="white-space:normal">🏠 <b>Propietario:</b> ${esc(r.comentario_propietario)}${r.comentario_propietario_fecha ? ` <small>(${fmtDate(String(r.comentario_propietario_fecha).slice(0, 10))})</small>` : ""}</span>` : ""}</td>
       <td class="actions"><button class="btn-link" data-rec-foto="${r.id}">Foto</button><button class="btn-primary btn-sm" data-rec-guardar="${r.id}">Guardar</button></td></tr>`
   );
-  return `<p class="hint">El estado y la respuesta que guardes los ve el inquilino en su portal.</p>
+  return `<p class="hint">El estado y la respuesta que guardes los ve el inquilino en su portal (y el propietario, si tiene link). Lo que comenta el propietario aparece debajo de la respuesta con 🏠.</p>
     <div class="table-wrap"><table class="data-table"><thead><tr><th>Fecha</th><th>Inquilino</th><th>Reclamo</th><th>Estado</th><th>Respuesta</th><th></th></tr></thead><tbody>${filas.join("") || vacio(6, "No hay reclamos")}</tbody></table></div>`;
 }
 
 function portalAvisosHtml() {
   const conLink = [...new Set(portal.accesos.filter((a) => a.activo).map((a) => a.inquilino_id))];
+  const propsConLink = [...new Set(portal.accesosProp.filter((a) => a.activo).map((a) => a.propietario_id))];
+  const paraTxt = (a) => (a.para === "propietarios" ? (a.propietario_id ? `🏠 ${esc(propietarioNombre(a.propietario_id))}` : "🏠 Todos los propietarios") : a.inquilino_id ? esc(inquilinoNombre(a.inquilino_id)) : "Todos los inquilinos");
   const filas = portal.avisos.map(
     (a) => `<tr><td>${fmtDate(String(a.creado).slice(0, 10))}</td><td><b>${esc(a.titulo)}</b><span class="sub-line" style="white-space:normal">${esc(a.texto || "")}</span></td>
-      <td>${a.inquilino_id ? esc(inquilinoNombre(a.inquilino_id)) : "Todos"}</td><td>${a.activo ? '<span class="pill pill-ok">Visible</span>' : '<span class="pill pill-gris">Oculto</span>'}</td>
+      <td>${paraTxt(a)}</td><td>${a.activo ? '<span class="pill pill-ok">Visible</span>' : '<span class="pill pill-gris">Oculto</span>'}</td>
       <td class="actions"><button class="btn-link" data-aviso-toggle="${a.id}" data-activo="${a.activo ? 1 : 0}">${a.activo ? "Ocultar" : "Mostrar"}</button></td></tr>`
   );
   return `<div class="panel" style="padding:16px;margin-bottom:14px"><h3 style="margin-top:0">Nuevo aviso</h3>
       <div class="form-grid">
         <div class="form-field"><label>Título</label><input type="text" id="av-titulo" placeholder="Ej.: Corte de agua el martes" /></div>
-        <div class="form-field"><label>Para</label><select id="av-para"><option value="">Todos los inquilinos</option>${conLink
+        <div class="form-field"><label>Para</label><select id="av-para"><optgroup label="Inquilinos"><option value="">Todos los inquilinos</option>${conLink
           .map((id) => [id, inquilinoNombre(id)])
           .sort((a, b) => a[1].localeCompare(b[1]))
           .map(([id, n]) => `<option value="${id}">${esc(n)}</option>`)
-          .join("")}</select></div>
+          .join("")}</optgroup>${
+          portal.estado?.portal_propietarios
+            ? `<optgroup label="Propietarios"><option value="P">Todos los propietarios</option>${propsConLink
+                .map((id) => [id, propietarioNombre(id)])
+                .sort((a, b) => a[1].localeCompare(b[1]))
+                .map(([id, n]) => `<option value="p:${id}">${esc(n)}</option>`)
+                .join("")}</optgroup>`
+            : ""
+        }</select></div>
         <div class="form-field full"><label>Texto</label><textarea id="av-texto" placeholder="Aparece arriba de todo en el portal"></textarea></div>
       </div><button class="btn-primary" id="av-crear">Publicar aviso</button></div>
     <div class="table-wrap"><table class="data-table"><thead><tr><th>Fecha</th><th>Aviso</th><th>Para</th><th>Estado</th><th></th></tr></thead><tbody>${filas.join("") || vacio(5, "No hay avisos")}</tbody></table></div>`;
@@ -4650,13 +4697,46 @@ $("portal-body").addEventListener("click", async (e) => {
   if (b.id === "av-crear") {
     const titulo = $("av-titulo").value.trim();
     if (!titulo) return toast("Escribí el título del aviso", true);
-    await call("portal_crear_aviso", { titulo, texto: $("av-texto").value, inquilinoId: $("av-para").value ? Number($("av-para").value) : null });
+    const para = $("av-para").value;
+    const aProp = para === "P" || para.startsWith("p:");
+    await call("portal_crear_aviso", {
+      titulo, texto: $("av-texto").value,
+      inquilinoId: !aProp && para ? Number(para) : null,
+      para: aProp ? "propietarios" : "inquilinos",
+      propietarioId: para.startsWith("p:") ? Number(para.slice(2)) : null,
+    });
     toast("Aviso publicado en el portal");
     await renderPortal();
   }
   if (b.dataset.avisoToggle) {
     await call("portal_actualizar", { que: "avisos", id: Number(b.dataset.avisoToggle), cambios: { activo: b.dataset.activo !== "1" } });
     await renderPortal();
+  }
+  // --- links de propietarios ---
+  if (b.id === "pp-copiar-sql") {
+    await copiarTexto(await (await fetch("portal-activar.sql")).text());
+    return toast("Código copiado: pegalo en el SQL Editor de Supabase y tocá Run");
+  }
+  if (b.id === "pp-verificar") {
+    await renderPortal();
+    return portal.estado?.portal_propietarios ? toast("¡Portal de propietarios activado!") : toast("Todavía no se ve activado. Revisá que haya dicho Success y esperá unos segundos.", true);
+  }
+  const propId = Number(b.dataset.lpEnviar || b.dataset.lpCopiar || b.dataset.lpRenovar || 0);
+  if (propId) {
+    const renovar = !!b.dataset.lpRenovar;
+    if (renovar && !confirm("¿Cambiar el link? El link anterior deja de funcionar y hay que mandarle el nuevo.")) return;
+    const token = await call("portal_crear_acceso_propietario", { propietarioId: propId, token: nuevoCodigoPortal(), renovar });
+    const link = linkPortalPropietario(token);
+    const p = byId(state.propietarios, propId);
+    if (b.dataset.lpCopiar) {
+      await copiarTexto(link);
+      toast("Link copiado");
+    } else {
+      const datos = { ...datosBaseMensaje(), nombre: primerNombre(p?.nombre || ""), link };
+      await enviarWhatsapp({ telefono: p?.telefono, nombre: p?.nombre, contrato_id: null, tipo: "mensaje", referencia: "portal_propietario", mensaje: completarPlantilla(cfg("plantilla_portal_propietario"), datos) });
+    }
+    await cargarPortal();
+    return renderPortal(false);
   }
   // --- links ---
   const inqId = Number(b.dataset.plEnviar || b.dataset.plCopiar || b.dataset.plRenovar || 0);

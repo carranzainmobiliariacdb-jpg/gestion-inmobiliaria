@@ -305,11 +305,13 @@ pub async fn estado_seguridad<R: tauri::Runtime>(app: tauri::AppHandle<R>, state
     // Sin internet no se puede preguntar a la base: se asume como estaba.
     let activa = sin_conexion || cliente.rpc("seguridad_activa", &json!({})).await.ok().and_then(|v| v.as_bool()).unwrap_or(false);
     let portal = cliente.select::<Value>("portal_accesos", "select=token&limit=1").await.is_ok();
+    let portal_prop = cliente.select::<Value>("portal_accesos_propietarios", "select=token&limit=1").await.is_ok();
     Ok(json!({
         "clave_oficina": tiene_clave,
         "acceso": acceso,
         "seguridad_activa": activa,
         "portal_tablas": portal,
+        "portal_propietarios": portal_prop,
         "url": config.map(|c| crate::supabase::normalizar_url(&c.url)).unwrap_or_default(),
     }))
 }

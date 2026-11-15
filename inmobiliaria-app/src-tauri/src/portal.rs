@@ -15,6 +15,7 @@ fn err<E: std::fmt::Display>(e: E) -> String {
 fn tabla(nombre: &str) -> Result<(&'static str, &'static str, &'static [&'static str]), String> {
     match nombre {
         "accesos" => Ok(("portal_accesos", "token,inquilino_id,creado,activo,ultimo_acceso", &["activo"])),
+        "accesos_prop" => Ok(("portal_accesos_propietarios", "token,propietario_id,creado,activo,ultimo_acceso", &["activo"])),
         "pagos" => Ok((
             "portal_pagos_informados",
             "id,inquilino_id,contrato_id,periodos,monto,fecha,metodo,nota,estado,respuesta,pago_id,creado,revisado",
@@ -22,10 +23,10 @@ fn tabla(nombre: &str) -> Result<(&'static str, &'static str, &'static [&'static
         )),
         "reclamos" => Ok((
             "portal_reclamos",
-            "id,inquilino_id,contrato_id,titulo,descripcion,estado,respuesta,creado,actualizado",
+            "id,inquilino_id,contrato_id,titulo,descripcion,estado,respuesta,creado,actualizado,comentario_propietario,comentario_propietario_fecha",
             &["estado", "respuesta", "actualizado"],
         )),
-        "avisos" => Ok(("portal_avisos", "id,inquilino_id,titulo,texto,activo,creado", &["titulo", "texto", "activo", "inquilino_id"])),
+        "avisos" => Ok(("portal_avisos", "id,inquilino_id,titulo,texto,activo,creado,para,propietario_id", &["titulo", "texto", "activo", "inquilino_id"])),
         _ => Err("Tabla del portal no válida".into()),
     }
 }
@@ -35,7 +36,15 @@ pub async fn portal_listar(state: State<'_, DbState>, que: String) -> Result<Vec
     let (t, cols, _) = tabla(&que)?;
     let orden = if que == "accesos" { "creado.desc" } else { "id.desc" };
     let cliente = obtener_cliente(&state).await?;
-    cliente.select(t, &format!("select={}&order={}&limit=500", cols, orden)).await.map_err(err)
+    match cliente.select(t, &format!("select={}&order={}&limit=500", cols, orden)).await {
+        // Base sin el portal del propietario todavía (columnas nuevas de
+        // v0.21.0): se listan las columnas de antes.
+        Err(e) if !e.red && (que == "reclamos" || que == "avisos") => {
+            let viejas = cols.replace(",comentario_propietario,comentario_propietario_fecha", "").replace(",para,propietario_id", "");
+            cliente.select(t, &format!("select={}&order={}&limit=500", viejas, orden)).await.map_err(err)
+        }
+        otro => otro.map_err(err),
+    }
 }
 
 #[tauri::command]
@@ -84,13 +93,51 @@ pub async fn portal_crear_acceso(state: State<'_, DbState>, inquilino_id: i64, t
     Ok(token)
 }
 
+/// Link del portal de un propietario (igual que el de los inquilinos).
 #[tauri::command]
-pub async fn portal_crear_aviso(state: State<'_, DbState>, titulo: String, texto: String, inquilino_id: Option<i64>) -> Result<(), String> {
+pub async fn portal_crear_acceso_propietario(state: State<'_, DbState>, propietario_id: i64, token: String, renovar: bool) -> Result<String, String> {
     let cliente = obtener_cliente(&state).await?;
+    if !renovar {
+        let actual: Option<Value> = cliente
+            .select_uno("portal_accesos_propietarios", &format!("propietario_id=eq.{}&activo=eq.true&select=token&order=creado.desc", propietario_id))
+            .await
+            .map_err(err)?;
+        if let Some(t) = actual.and_then(|v| v.get("token").and_then(Value::as_str).map(String::from)) {
+            return Ok(t);
+        }
+    } else {
+        cliente
+            .update("portal_accesos_propietarios", &format!("propietario_id=eq.{}", propietario_id), &json!({ "activo": false }))
+            .await
+            .map_err(err)?;
+    }
+    if token.len() < 24 || !token.chars().all(|c| c.is_ascii_alphanumeric()) {
+        return Err("Código de acceso no válido".into());
+    }
     let _: Value = cliente
-        .insert("portal_avisos", &json!({ "titulo": titulo.trim(), "texto": texto.trim(), "inquilino_id": inquilino_id }))
+        .insert("portal_accesos_propietarios", &json!({ "token": token, "propietario_id": propietario_id }))
         .await
         .map_err(err)?;
+    Ok(token)
+}
+
+/// Aviso para los inquilinos (`para` = "inquilinos", como siempre) o para
+/// los propietarios (`para` = "propietarios").
+#[tauri::command]
+pub async fn portal_crear_aviso(
+    state: State<'_, DbState>,
+    titulo: String,
+    texto: String,
+    inquilino_id: Option<i64>,
+    para: Option<String>,
+    propietario_id: Option<i64>,
+) -> Result<(), String> {
+    let cliente = obtener_cliente(&state).await?;
+    let mut body = json!({ "titulo": titulo.trim(), "texto": texto.trim(), "inquilino_id": inquilino_id });
+    if para.as_deref() == Some("propietarios") {
+        body = json!({ "titulo": titulo.trim(), "texto": texto.trim(), "para": "propietarios", "propietario_id": propietario_id });
+    }
+    let _: Value = cliente.insert("portal_avisos", &body).await.map_err(err)?;
     Ok(())
 }
 

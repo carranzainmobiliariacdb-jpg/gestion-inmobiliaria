@@ -220,6 +220,13 @@ pub static TABLAS: &[Tabla] = &[
         Columna { nombre: "activo", defecto: Defecto::Json(r#"true"#) },
         Columna { nombre: "ultimo_acceso", defecto: Defecto::Nada },
     ] },
+    Tabla { nombre: "portal_accesos_propietarios", pk: "token", unicas: &[], columnas: &[
+        Columna { nombre: "token", defecto: Defecto::Nada },
+        Columna { nombre: "propietario_id", defecto: Defecto::Nada },
+        Columna { nombre: "creado", defecto: Defecto::Ahora },
+        Columna { nombre: "activo", defecto: Defecto::Json(r#"true"#) },
+        Columna { nombre: "ultimo_acceso", defecto: Defecto::Nada },
+    ] },
     Tabla { nombre: "portal_avisos", pk: "id", unicas: &[], columnas: &[
         Columna { nombre: "id", defecto: Defecto::Serial },
         Columna { nombre: "inquilino_id", defecto: Defecto::Nada },
@@ -227,6 +234,8 @@ pub static TABLAS: &[Tabla] = &[
         Columna { nombre: "texto", defecto: Defecto::Nada },
         Columna { nombre: "activo", defecto: Defecto::Json(r#"true"#) },
         Columna { nombre: "creado", defecto: Defecto::Ahora },
+        Columna { nombre: "para", defecto: Defecto::Json(r#""inquilinos""#) },
+        Columna { nombre: "propietario_id", defecto: Defecto::Nada },
     ] },
     Tabla { nombre: "portal_pagos_informados", pk: "id", unicas: &[], columnas: &[
         Columna { nombre: "id", defecto: Defecto::Serial },
@@ -255,6 +264,8 @@ pub static TABLAS: &[Tabla] = &[
         Columna { nombre: "respuesta", defecto: Defecto::Nada },
         Columna { nombre: "creado", defecto: Defecto::Ahora },
         Columna { nombre: "actualizado", defecto: Defecto::Ahora },
+        Columna { nombre: "comentario_propietario", defecto: Defecto::Nada },
+        Columna { nombre: "comentario_propietario_fecha", defecto: Defecto::Nada },
     ] },
     Tabla { nombre: "propietarios", pk: "id", unicas: &[], columnas: &[
         Columna { nombre: "id", defecto: Defecto::Serial },
@@ -324,7 +335,9 @@ pub static FKS: &[Fk] = &[
     Fk { tabla: "liquidaciones", columna: "pago_id", ref_tabla: "pagos", al_borrar: 'r' },
     Fk { tabla: "pagos", columna: "contrato_id", ref_tabla: "contratos", al_borrar: 'r' },
     Fk { tabla: "portal_accesos", columna: "inquilino_id", ref_tabla: "inquilinos", al_borrar: 'c' },
+    Fk { tabla: "portal_accesos_propietarios", columna: "propietario_id", ref_tabla: "propietarios", al_borrar: 'c' },
     Fk { tabla: "portal_avisos", columna: "inquilino_id", ref_tabla: "inquilinos", al_borrar: 'c' },
+    Fk { tabla: "portal_avisos", columna: "propietario_id", ref_tabla: "propietarios", al_borrar: 'c' },
     Fk { tabla: "portal_pagos_informados", columna: "contrato_id", ref_tabla: "contratos", al_borrar: 'c' },
     Fk { tabla: "portal_pagos_informados", columna: "inquilino_id", ref_tabla: "inquilinos", al_borrar: 'c' },
     Fk { tabla: "portal_reclamos", columna: "contrato_id", ref_tabla: "contratos", al_borrar: 'c' },

@@ -137,6 +137,7 @@ pub fn manejador<R: tauri::Runtime>() -> impl Fn(tauri::ipc::Invoke<R>) -> bool 
         honorarios::eliminar_honorario_plan,
         portal::portal_actualizar,
         portal::portal_crear_acceso,
+        portal::portal_crear_acceso_propietario,
         portal::portal_crear_aviso,
         portal::portal_imagen,
         sincro::estado_conexion,

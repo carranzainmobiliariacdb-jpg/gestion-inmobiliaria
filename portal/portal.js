@@ -13,6 +13,27 @@ const $ = (id) => document.getElementById(id);
 const app = $("app");
 
 // ---------- código de acceso ----------
+// Link de propietario: …/#p=CODIGO (lo maneja propietario.js).
+function leerTokenPropietario() {
+  const m = location.hash.match(/p=([A-Za-z0-9]{20,})/);
+  const t = location.hash.match(/t=([A-Za-z0-9]{20,})/);
+  try {
+    if (m) {
+      localStorage.setItem("portal_token_prop", m[1]);
+      localStorage.setItem("portal_modo", "propietario");
+      return m[1];
+    }
+    if (t) {
+      localStorage.setItem("portal_modo", "inquilino");
+      return "";
+    }
+    return localStorage.getItem("portal_modo") === "propietario" ? localStorage.getItem("portal_token_prop") || "" : "";
+  } catch {
+    return m ? m[1] : "";
+  }
+}
+const tokenPropietario = leerTokenPropietario();
+
 function leerToken() {
   const m = location.hash.match(/t=([A-Za-z0-9]{20,})/);
   try {
@@ -283,7 +304,7 @@ function vistaReclamos(c) {
 // ---------- acciones ----------
 app.addEventListener("click", async (e) => {
   const b = e.target.closest("button");
-  if (!b) return;
+  if (!b || !D) return;
   if (b.dataset.t) {
     pestana = b.dataset.t;
     render();
@@ -433,6 +454,11 @@ async function cargar(mostrarSpinner = true) {
 }
 
 (async () => {
+  if (tokenPropietario) {
+    if (location.hash) history.replaceState(null, "", location.pathname + location.search);
+    const { iniciar } = await import("./propietario.js");
+    return iniciar(tokenPropietario);
+  }
   if (!C.url || !C.anon) {
     app.innerHTML = `<div class="card error-caja"><h1>Portal en preparación</h1><p>Volvé a intentar en unos minutos.</p></div>`;
     return;
